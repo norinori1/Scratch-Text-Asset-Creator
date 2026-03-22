@@ -181,7 +181,7 @@ function mkItemOfList(
 // Returns [firstBlockId, lastBlockId]
 function buildRenderCharBlocks(
   blocks: Record<string, ScratchBlock>,
-  varIId: string, varIName: string,
+  varIId: string,
   varDisplayTextId: string,
   varCurXId: string, varCurYId: string,
   varCharIndexId: string, varCharIndexName: string,
@@ -729,7 +729,7 @@ export function generateScratchProject(
   } else {
     [renderFirst, renderLast] = buildRenderCharBlocks(
       blocks,
-      varI, "__font_i", varDisplayText, varCurX, varCurY,
+      varI, varDisplayText, varCurX, varCurY,
       varCharIndex, "__font_charIndex",
       varLetterSpacing, "__font_letterSpacing",
       listCharMap,
@@ -843,7 +843,7 @@ export function generateScratchProject(
   mk(blocks, defId, "procedures_definition", { custom_block: [1, protoId] }, {}, true, false, [800, 0]);
 
   // Block body: set __font_* variables from args, then broadcast clear + render
-  function makeSetFromArg(varId: string, varName: string, argId: string, argName: string, isStr = false): string {
+  function makeSetFromArg(varId: string, varName: string, _argId: string, argName: string, isStr = false): string {
     const bSet = uid(), rArg = uid();
     mk(blocks, rArg, "argument_reporter_string_number", {}, { VALUE: [argName, null] });
     setParent(blocks, rArg, bSet);

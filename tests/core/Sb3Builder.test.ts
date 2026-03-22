@@ -91,7 +91,7 @@ describe("generateScratchProject", () => {
 
   it("warp is true by default", () => {
     const project = generateScratchProject([], [], "abc123") as {
-      targets: { blocks: Record<string, { opcode: string; mutation?: { warp: string } }> }[]
+      targets: { blocks: Record<string, { opcode: string; mutation?: { proccode?: string; warp: string } }> }[]
     };
     const sprite = project.targets[1];
     const proto = Object.values(sprite.blocks).find((b) => b.opcode === "procedures_prototype" && b.mutation?.proccode?.includes("テキストを表示する"));
@@ -101,7 +101,7 @@ describe("generateScratchProject", () => {
   it("warp is false when specified in options", () => {
     const opts: ExportOptions = { ...defaultOptions, warp: false };
     const project = generateScratchProject([], [], "abc123", opts) as {
-      targets: { blocks: Record<string, { opcode: string; mutation?: { warp: string } }> }[]
+      targets: { blocks: Record<string, { opcode: string; mutation?: { proccode?: string; warp: string } }> }[]
     };
     const sprite = project.targets[1];
     const proto = Object.values(sprite.blocks).find((b) => b.opcode === "procedures_prototype" && b.mutation?.proccode?.includes("テキストを表示する"));
