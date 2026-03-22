@@ -334,6 +334,20 @@ export function generateScratchProject(
   const varAlign = uid();
   const varTotalWidth = uid();
   const varJ = uid();
+  // Typewriter variables (§17)
+  const varTwRunning = uid();  // __tw_running
+  const varTwSkip = uid();     // __tw_skip
+  const varTwChar = uid();     // __tw_char
+  // Number format variables (§18)
+  const varFmtResult = uid();  // __fmt_result
+  const varFmtStr = uid();     // __fmt_str
+  const varFmtI = uid();       // __fmt_i
+  const varFmtPos = uid();     // __fmt_pos
+  const varFmtMin = uid();     // __fmt_min
+  const varFmtSec = uid();     // __fmt_sec
+  const varFmtFactor = uid();  // __fmt_factor
+  const varFmtInt = uid();     // __fmt_int
+  const varFmtMinStr = uid();  // __fmt_min_str
   // listCharMap
   const listCharMap = uid();
   // Stage-level lists (for all sprites)
@@ -379,6 +393,15 @@ export function generateScratchProject(
     "改行コード: \\n で改行できます",
     "=== テキストをすべてクリアする ===",
     "表示中のテキストを全て消去します",
+    "=== テキストをタイプライター表示する ===",
+    "1文字ずつ順に表示するタイプライター演出",
+    "速さ: 0 = 即時, 60 = 60ms/文字",
+    "スペースキーでスキップ可能",
+    "=== 数値フォーマットユーティリティ ===",
+    "__font_fmt_zeroPad (数値) (桁数) → __fmt_result",
+    "__font_fmt_comma (数値) → __fmt_result",
+    "__font_fmt_timer (秒数) → __fmt_result",
+    "__font_fmt_fixed (数値) (小数桁) → __fmt_result",
   ];
 
   const blocks: Record<string, ScratchBlock> = {};
@@ -1139,6 +1162,1002 @@ export function generateScratchProject(
     chain(blocks, [clearDefId, bClearBc]);
   }
 
+  // ── Script 7: Custom block ── テキストをタイプライター表示する ──
+  // Renders text character by character with an optional per-character delay.
+  // Warp is explicitly "false" so that wait blocks inside actually pause.
+  // When space is pressed while running, __tw_skip is set to 1 to bypass waits.
+  {
+    const twProcCode = "テキストをタイプライター表示する %s x: %s y: %s 速さ: %s";
+    const twArgTextId = uid(), twArgXId = uid(), twArgYId = uid(), twArgMsId = uid();
+    const twProtoId = uid(), twDefId = uid();
+
+    const twArgTextShadow = uid(), twArgXShadow = uid(), twArgYShadow = uid(), twArgMsShadow = uid();
+    mk(blocks, twArgTextShadow, "argument_reporter_string_number", {}, { VALUE: ["text", null] }, false, true);
+    setParent(blocks, twArgTextShadow, twProtoId);
+    mk(blocks, twArgXShadow, "argument_reporter_string_number", {}, { VALUE: ["x", null] }, false, true);
+    setParent(blocks, twArgXShadow, twProtoId);
+    mk(blocks, twArgYShadow, "argument_reporter_string_number", {}, { VALUE: ["y", null] }, false, true);
+    setParent(blocks, twArgYShadow, twProtoId);
+    mk(blocks, twArgMsShadow, "argument_reporter_string_number", {}, { VALUE: ["msPerChar", null] }, false, true);
+    setParent(blocks, twArgMsShadow, twProtoId);
+
+    mk(blocks, twProtoId, "procedures_prototype",
+      {
+        [twArgTextId]: [1, twArgTextShadow],
+        [twArgXId]: [1, twArgXShadow],
+        [twArgYId]: [1, twArgYShadow],
+        [twArgMsId]: [1, twArgMsShadow],
+      },
+      {},
+      false, true, undefined,
+      {
+        tagName: "mutation",
+        children: [],
+        proccode: twProcCode,
+        argumentids: JSON.stringify([twArgTextId, twArgXId, twArgYId, twArgMsId]),
+        argumentnames: JSON.stringify(["text", "x", "y", "msPerChar"]),
+        argumentdefaults: JSON.stringify(["", "", "", "60"]),
+        warp: "false",
+      });
+    setParent(blocks, twProtoId, twDefId);
+    mk(blocks, twDefId, "procedures_definition", { custom_block: [1, twProtoId] }, {}, true, false, [800, 700]);
+
+    // 1. set __font_displayText = text arg
+    const twSetDT = uid(), twArgDTVal = uid();
+    mk(blocks, twArgDTVal, "argument_reporter_string_number", {}, { VALUE: ["text", null] });
+    setParent(blocks, twArgDTVal, twSetDT);
+    mk(blocks, twSetDT, "data_setvariableto",
+      { VALUE: blockInputStr(twArgDTVal) },
+      { VARIABLE: ["__font_displayText", varDisplayText] });
+
+    // 2. set __font_x = x arg (if "" use Font_Config[1])
+    const twSetX = uid(), twArgXVal = uid(), twXCond = uid(), twXItem = uid(), twXFromArg = uid(), twSetXIf = uid();
+    mk(blocks, twArgXVal, "argument_reporter_string_number", {}, { VALUE: ["x", null] });
+    mk(blocks, twXCond, "operator_equals", {
+      OPERAND1: blockInputStr(twArgXVal),
+      OPERAND2: strLit(""),
+    }, {});
+    setParent(blocks, twArgXVal, twXCond);
+    mk(blocks, twXItem, "data_itemoflist", { INDEX: numLit(1) }, { LIST: ["Font_Config", listFontConfig] });
+    mk(blocks, twSetX, "data_setvariableto",
+      { VALUE: blockInput(twXItem) },
+      { VARIABLE: ["__font_x", varX] });
+    setParent(blocks, twXItem, twSetX);
+    const twArgXVal2 = uid();
+    mk(blocks, twArgXVal2, "argument_reporter_string_number", {}, { VALUE: ["x", null] });
+    mk(blocks, twXFromArg, "data_setvariableto",
+      { VALUE: blockInput(twArgXVal2) },
+      { VARIABLE: ["__font_x", varX] });
+    setParent(blocks, twArgXVal2, twXFromArg);
+    mk(blocks, twSetXIf, "control_if_else", {
+      CONDITION: boolInput(twXCond),
+      SUBSTACK: substackInput(twSetX),
+      SUBSTACK2: substackInput(twXFromArg),
+    }, {});
+    setParent(blocks, twXCond, twSetXIf);
+    setParent(blocks, twSetX, twSetXIf);
+    setParent(blocks, twXFromArg, twSetXIf);
+
+    // 3. set __font_y = y arg (if "" use Font_Config[2])
+    const twSetY = uid(), twArgYVal = uid(), twYCond = uid(), twYItem = uid(), twYFromArg = uid(), twSetYIf = uid();
+    mk(blocks, twArgYVal, "argument_reporter_string_number", {}, { VALUE: ["y", null] });
+    mk(blocks, twYCond, "operator_equals", {
+      OPERAND1: blockInputStr(twArgYVal),
+      OPERAND2: strLit(""),
+    }, {});
+    setParent(blocks, twArgYVal, twYCond);
+    mk(blocks, twYItem, "data_itemoflist", { INDEX: numLit(2) }, { LIST: ["Font_Config", listFontConfig] });
+    mk(blocks, twSetY, "data_setvariableto",
+      { VALUE: blockInput(twYItem) },
+      { VARIABLE: ["__font_y", varY] });
+    setParent(blocks, twYItem, twSetY);
+    const twArgYVal2 = uid();
+    mk(blocks, twArgYVal2, "argument_reporter_string_number", {}, { VALUE: ["y", null] });
+    mk(blocks, twYFromArg, "data_setvariableto",
+      { VALUE: blockInput(twArgYVal2) },
+      { VARIABLE: ["__font_y", varY] });
+    setParent(blocks, twArgYVal2, twYFromArg);
+    mk(blocks, twSetYIf, "control_if_else", {
+      CONDITION: boolInput(twYCond),
+      SUBSTACK: substackInput(twSetY),
+      SUBSTACK2: substackInput(twYFromArg),
+    }, {});
+    setParent(blocks, twYCond, twSetYIf);
+    setParent(blocks, twSetY, twSetYIf);
+    setParent(blocks, twYFromArg, twSetYIf);
+
+    // 4. Call テキストをすべてクリアする
+    const twCallClear = uid();
+    mk(blocks, twCallClear, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: clearProcCode,
+      argumentids: JSON.stringify([]),
+      warp: warpStr,
+    });
+
+    // 5. set __tw_running = 1
+    const twSetRunning = uid();
+    mk(blocks, twSetRunning, "data_setvariableto", { VALUE: numLit(1) },
+      { VARIABLE: ["__tw_running", varTwRunning] });
+
+    // 6. set __tw_skip = 0
+    const twSetSkip0 = uid();
+    mk(blocks, twSetSkip0, "data_setvariableto", { VALUE: numLit(0) },
+      { VARIABLE: ["__tw_skip", varTwSkip] });
+
+    // 7-10. Set size/color/brightness/ghost from Font_Config
+    const twCfgSzItem = uid(), twSetSz = uid();
+    mk(blocks, twCfgSzItem, "data_itemoflist", { INDEX: numLit(3) }, { LIST: ["Font_Config", listFontConfig] });
+    mk(blocks, twSetSz, "data_setvariableto",
+      { VALUE: blockInput(twCfgSzItem) },
+      { VARIABLE: ["__font_size", varSize] });
+    setParent(blocks, twCfgSzItem, twSetSz);
+
+    const twCfgColItem = uid(), twSetCol = uid();
+    mk(blocks, twCfgColItem, "data_itemoflist", { INDEX: numLit(4) }, { LIST: ["Font_Config", listFontConfig] });
+    mk(blocks, twSetCol, "data_setvariableto",
+      { VALUE: blockInput(twCfgColItem) },
+      { VARIABLE: ["__font_color", varColor] });
+    setParent(blocks, twCfgColItem, twSetCol);
+
+    const twCfgBrItem = uid(), twSetBr = uid();
+    mk(blocks, twCfgBrItem, "data_itemoflist", { INDEX: numLit(5) }, { LIST: ["Font_Config", listFontConfig] });
+    mk(blocks, twSetBr, "data_setvariableto",
+      { VALUE: blockInput(twCfgBrItem) },
+      { VARIABLE: ["__font_brightness", varBrightness] });
+    setParent(blocks, twCfgBrItem, twSetBr);
+
+    const twCfgGhItem = uid(), twSetGh = uid();
+    mk(blocks, twCfgGhItem, "data_itemoflist", { INDEX: numLit(6) }, { LIST: ["Font_Config", listFontConfig] });
+    mk(blocks, twSetGh, "data_setvariableto",
+      { VALUE: blockInput(twCfgGhItem) },
+      { VARIABLE: ["__font_ghost", varGhost] });
+    setParent(blocks, twCfgGhItem, twSetGh);
+
+    // 11. set __font_curX = __font_x
+    const twSetCurX = uid(), twXVar = uid();
+    mk(blocks, twXVar, "data_variable", {}, { VARIABLE: ["__font_x", varX] });
+    setParent(blocks, twXVar, twSetCurX);
+    mk(blocks, twSetCurX, "data_setvariableto",
+      { VALUE: blockInput(twXVar) },
+      { VARIABLE: ["__font_curX", varCurX] });
+
+    // 12. set __font_curY = __font_y
+    const twSetCurY = uid(), twYVar = uid();
+    mk(blocks, twYVar, "data_variable", {}, { VARIABLE: ["__font_y", varY] });
+    setParent(blocks, twYVar, twSetCurY);
+    mk(blocks, twSetCurY, "data_setvariableto",
+      { VALUE: blockInput(twYVar) },
+      { VARIABLE: ["__font_curY", varCurY] });
+
+    // 13-16. Apply visual effects to the sprite
+    const twApplySz = uid(), twSzVar = uid();
+    mk(blocks, twSzVar, "data_variable", {}, { VARIABLE: ["__font_size", varSize] });
+    setParent(blocks, twSzVar, twApplySz);
+    mk(blocks, twApplySz, "looks_setsizeto", { SIZE: blockInput(twSzVar) }, {});
+
+    const twApplyCol = uid(), twColVar = uid();
+    mk(blocks, twColVar, "data_variable", {}, { VARIABLE: ["__font_color", varColor] });
+    setParent(blocks, twColVar, twApplyCol);
+    mk(blocks, twApplyCol, "looks_seteffectto", { VALUE: blockInput(twColVar) }, { EFFECT: ["color", null] });
+
+    const twApplyBr = uid(), twBrVar = uid();
+    mk(blocks, twBrVar, "data_variable", {}, { VARIABLE: ["__font_brightness", varBrightness] });
+    setParent(blocks, twBrVar, twApplyBr);
+    mk(blocks, twApplyBr, "looks_seteffectto", { VALUE: blockInput(twBrVar) }, { EFFECT: ["brightness", null] });
+
+    const twApplyGh = uid(), twGhVar = uid();
+    mk(blocks, twGhVar, "data_variable", {}, { VARIABLE: ["__font_ghost", varGhost] });
+    setParent(blocks, twGhVar, twApplyGh);
+    mk(blocks, twApplyGh, "looks_seteffectto", { VALUE: blockInput(twGhVar) }, { EFFECT: ["ghost", null] });
+
+    // 17. set __font_i = 1
+    const twSetI = uid();
+    mk(blocks, twSetI, "data_setvariableto", { VALUE: numLit(1) },
+      { VARIABLE: ["__font_i", varI] });
+
+    // 18. Repeat (length of __font_displayText) times
+    const twRepeat = uid();
+    const twLenDTVar = uid(), twLenDT = uid();
+    mk(blocks, twLenDTVar, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
+    setParent(blocks, twLenDTVar, twLenDT);
+    mk(blocks, twLenDT, "operator_length", { STRING: blockInputStr(twLenDTVar) }, {});
+    setParent(blocks, twLenDT, twRepeat);
+
+    // a. set __tw_char = letter __font_i of __font_displayText
+    const twSetChar = uid(), twLetterChar = mkLetterOf(blocks, varI, "__font_i", varDisplayText, "__font_displayText");
+    setParent(blocks, twLetterChar, twSetChar);
+    mk(blocks, twSetChar, "data_setvariableto",
+      { VALUE: blockInputStr(twLetterChar) },
+      { VARIABLE: ["__tw_char", varTwChar] });
+
+    // b. if __tw_char = "\":
+    //      if letter (__font_i + 1) of displayText = "n": handle newline
+    const twIfBS = uid(), twCondBS = uid(), twCharVar = uid();
+    mk(blocks, twCharVar, "data_variable", {}, { VARIABLE: ["__tw_char", varTwChar] });
+    setParent(blocks, twCharVar, twCondBS);
+    mk(blocks, twCondBS, "operator_equals", {
+      OPERAND1: blockInputStr(twCharVar),
+      OPERAND2: strLit("\\"),
+    }, {});
+    setParent(blocks, twCondBS, twIfBS);
+
+    // i+1 block
+    const twIPlusVar = uid(), twIPlus1 = uid();
+    mk(blocks, twIPlusVar, "data_variable", {}, { VARIABLE: ["__font_i", varI] });
+    setParent(blocks, twIPlusVar, twIPlus1);
+    mk(blocks, twIPlus1, "operator_add", { NUM1: blockInput(twIPlusVar, 1), NUM2: numLit(1) }, {});
+
+    // letter (i+1) of displayText
+    const twLetterNext = uid(), twNDTVar = uid();
+    mk(blocks, twNDTVar, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
+    setParent(blocks, twNDTVar, twLetterNext);
+    setParent(blocks, twIPlus1, twLetterNext);
+    mk(blocks, twLetterNext, "operator_letter_of", {
+      LETTER: blockInput(twIPlus1, 1),
+      STRING: blockInputStr(twNDTVar),
+    }, {});
+
+    const twIfN = uid(), twCondN = uid();
+    setParent(blocks, twLetterNext, twCondN);
+    mk(blocks, twCondN, "operator_equals", {
+      OPERAND1: blockInputStr(twLetterNext),
+      OPERAND2: strLit("n"),
+    }, {});
+    setParent(blocks, twCondN, twIfN);
+
+    // newline body: set curX = x, change curY by -lineHeight, change i by 1
+    const twNLResetCurX = uid(), twNLXVar = uid();
+    mk(blocks, twNLXVar, "data_variable", {}, { VARIABLE: ["__font_x", varX] });
+    setParent(blocks, twNLXVar, twNLResetCurX);
+    mk(blocks, twNLResetCurX, "data_setvariableto",
+      { VALUE: blockInput(twNLXVar) },
+      { VARIABLE: ["__font_curX", varCurX] });
+
+    const twNLChangeCurY = uid(), twNLNegLH = uid(), twNLLHVar = uid();
+    mk(blocks, twNLLHVar, "data_variable", {}, { VARIABLE: ["__font_lineHeight", varLineHeight] });
+    setParent(blocks, twNLLHVar, twNLNegLH);
+    mk(blocks, twNLNegLH, "operator_subtract", { NUM1: numLit(0), NUM2: blockInput(twNLLHVar) }, {});
+    setParent(blocks, twNLNegLH, twNLChangeCurY);
+    mk(blocks, twNLChangeCurY, "data_changevariableby",
+      { VALUE: blockInput(twNLNegLH) },
+      { VARIABLE: ["__font_curY", varCurY] });
+
+    const twNLSkipN = uid();
+    mk(blocks, twNLSkipN, "data_changevariableby", { VALUE: numLit(1) },
+      { VARIABLE: ["__font_i", varI] });
+
+    chain(blocks, [twNLResetCurX, twNLChangeCurY, twNLSkipN]);
+
+    mk(blocks, twIfN, "control_if", {
+      CONDITION: boolInput(twCondN),
+      SUBSTACK: substackInput(twNLResetCurX),
+    }, {});
+    setParent(blocks, twNLResetCurX, twIfN);
+
+    // c. else: call __font_bsearch(__tw_char), if result ≠ "" render char
+    const twCharVal = uid();
+    mk(blocks, twCharVal, "data_variable", {}, { VARIABLE: ["__tw_char", varTwChar] });
+    const twBsShadow = uid();
+    mk(blocks, twBsShadow, "argument_reporter_string_number", {}, { VALUE: ["target", null] }, false, true);
+    const twCallBS = uid();
+    setParent(blocks, twCharVal, twCallBS);
+    setParent(blocks, twBsShadow, twCallBS);
+    mk(blocks, twCallBS, "procedures_call", {
+      [bsArgTargetId]: [3, twCharVal, twBsShadow],
+    }, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: BSEARCH_PROC_CODE,
+      argumentids: JSON.stringify([bsArgTargetId]),
+      warp: "true",
+    });
+
+    // if __font_bsearch_result ≠ "": render
+    const twIfRes = uid(), twCondEq = uid(), twBsResVar = uid(), twCondNotEmpty = uid();
+    mk(blocks, twBsResVar, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] });
+    setParent(blocks, twBsResVar, twCondEq);
+    mk(blocks, twCondEq, "operator_equals", {
+      OPERAND1: blockInputStr(twBsResVar),
+      OPERAND2: strLit(""),
+    }, {});
+    setParent(blocks, twCondEq, twCondNotEmpty);
+    mk(blocks, twCondNotEmpty, "operator_not", { OPERAND: boolInput(twCondEq) }, {});
+    setParent(blocks, twCondNotEmpty, twIfRes);
+
+    // switch costume to __tw_char
+    const twSwitch = uid(), twCharForCostume = uid(), twCostumeMenu = uid();
+    mk(blocks, twCharForCostume, "data_variable", {}, { VARIABLE: ["__tw_char", varTwChar] });
+    mk(blocks, twCostumeMenu, "looks_costume", {}, { COSTUME: ["", null] }, false, true);
+    setParent(blocks, twCharForCostume, twSwitch);
+    setParent(blocks, twCostumeMenu, twSwitch);
+    mk(blocks, twSwitch, "looks_switchcostumeto", {
+      COSTUME: [3, twCharForCostume, twCostumeMenu],
+    }, {});
+
+    // go to x: curX y: curY
+    const twGoto = uid(), twGotoXVar = uid(), twGotoYVar = uid();
+    mk(blocks, twGotoXVar, "data_variable", {}, { VARIABLE: ["__font_curX", varCurX] });
+    setParent(blocks, twGotoXVar, twGoto);
+    mk(blocks, twGotoYVar, "data_variable", {}, { VARIABLE: ["__font_curY", varCurY] });
+    setParent(blocks, twGotoYVar, twGoto);
+    mk(blocks, twGoto, "motion_gotoxy", {
+      X: blockInput(twGotoXVar),
+      Y: blockInput(twGotoYVar),
+    }, {});
+
+    // show (clone only) / stamp (pen) / hide (clone only), then change curX
+    let twRenderFirst: string, twRenderLast: string;
+    if (isPen) {
+      const twStamp = uid();
+      mk(blocks, twStamp, "pen_stamp", {}, {});
+      const twBsResAdvVar = uid(), twLSAdvVar = uid(), twAddLS = uid(), twChangeCurX = uid();
+      mk(blocks, twBsResAdvVar, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] });
+      mk(blocks, twLSAdvVar, "data_variable", {}, { VARIABLE: ["__font_letterSpacing", varLetterSpacing] });
+      setParent(blocks, twBsResAdvVar, twAddLS);
+      setParent(blocks, twLSAdvVar, twAddLS);
+      mk(blocks, twAddLS, "operator_add", {
+        NUM1: blockInput(twBsResAdvVar),
+        NUM2: blockInput(twLSAdvVar),
+      }, {});
+      setParent(blocks, twAddLS, twChangeCurX);
+      mk(blocks, twChangeCurX, "data_changevariableby",
+        { VALUE: blockInput(twAddLS) },
+        { VARIABLE: ["__font_curX", varCurX] });
+      chain(blocks, [twSwitch, twGoto, twStamp, twChangeCurX]);
+      twRenderFirst = twSwitch;
+      twRenderLast = twChangeCurX;
+    } else {
+      const twShow = uid();
+      mk(blocks, twShow, "looks_show", {}, {});
+      const twClone = uid(), twCloneMenu = uid();
+      mk(blocks, twCloneMenu, "control_create_clone_of_menu", {}, { CLONE_OPTION: ["_myself_", null] }, false, true);
+      setParent(blocks, twCloneMenu, twClone);
+      mk(blocks, twClone, "control_create_clone_of", { CLONE_OPTION: [1, twCloneMenu] }, {});
+      const twHide = uid();
+      mk(blocks, twHide, "looks_hide", {}, {});
+      const twBsResAdvVar = uid(), twLSAdvVar = uid(), twAddLS = uid(), twChangeCurX = uid();
+      mk(blocks, twBsResAdvVar, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] });
+      mk(blocks, twLSAdvVar, "data_variable", {}, { VARIABLE: ["__font_letterSpacing", varLetterSpacing] });
+      setParent(blocks, twBsResAdvVar, twAddLS);
+      setParent(blocks, twLSAdvVar, twAddLS);
+      mk(blocks, twAddLS, "operator_add", {
+        NUM1: blockInput(twBsResAdvVar),
+        NUM2: blockInput(twLSAdvVar),
+      }, {});
+      setParent(blocks, twAddLS, twChangeCurX);
+      mk(blocks, twChangeCurX, "data_changevariableby",
+        { VALUE: blockInput(twAddLS) },
+        { VARIABLE: ["__font_curX", varCurX] });
+      chain(blocks, [twSwitch, twGoto, twShow, twClone, twHide, twChangeCurX]);
+      twRenderFirst = twSwitch;
+      twRenderLast = twChangeCurX;
+    }
+
+    mk(blocks, twIfRes, "control_if", {
+      CONDITION: boolInput(twCondNotEmpty),
+      SUBSTACK: substackInput(twRenderFirst),
+    }, {});
+    setParent(blocks, twRenderFirst, twIfRes);
+    setParent(blocks, twRenderLast, twIfRes);
+
+    chain(blocks, [twCallBS, twIfRes]);
+
+    // outer if/else: backslash → newline handler, else → bsearch+render
+    mk(blocks, twIfBS, "control_if_else", {
+      CONDITION: boolInput(twCondBS),
+      SUBSTACK: substackInput(twIfN),
+      SUBSTACK2: substackInput(twCallBS),
+    }, {});
+    setParent(blocks, twIfN, twIfBS);
+    setParent(blocks, twCallBS, twIfBS);
+
+    // d. if (msPerChar > 0) and (__tw_skip = 0): wait msPerChar/1000 seconds
+    const twIfWait = uid();
+    const twCondAnd = uid(), twCondMsGt0 = uid(), twCondSkip0 = uid();
+    const twMsArgGt = uid();
+    mk(blocks, twMsArgGt, "argument_reporter_string_number", {}, { VALUE: ["msPerChar", null] });
+    setParent(blocks, twMsArgGt, twCondMsGt0);
+    mk(blocks, twCondMsGt0, "operator_gt", {
+      OPERAND1: blockInput(twMsArgGt),
+      OPERAND2: numLit(0),
+    }, {});
+    setParent(blocks, twCondMsGt0, twCondAnd);
+    const twSkipVar = uid();
+    mk(blocks, twSkipVar, "data_variable", {}, { VARIABLE: ["__tw_skip", varTwSkip] });
+    setParent(blocks, twSkipVar, twCondSkip0);
+    mk(blocks, twCondSkip0, "operator_equals", {
+      OPERAND1: blockInput(twSkipVar),
+      OPERAND2: numLit(0),
+    }, {});
+    setParent(blocks, twCondSkip0, twCondAnd);
+    mk(blocks, twCondAnd, "operator_and", {
+      OPERAND1: boolInput(twCondMsGt0),
+      OPERAND2: boolInput(twCondSkip0),
+    }, {});
+    setParent(blocks, twCondAnd, twIfWait);
+
+    // wait (msPerChar / 1000) seconds
+    const twWait = uid(), twWaitDiv = uid(), twMsArgDiv = uid();
+    mk(blocks, twMsArgDiv, "argument_reporter_string_number", {}, { VALUE: ["msPerChar", null] });
+    setParent(blocks, twMsArgDiv, twWaitDiv);
+    mk(blocks, twWaitDiv, "operator_divide", {
+      NUM1: blockInput(twMsArgDiv),
+      NUM2: numLit(1000),
+    }, {});
+    setParent(blocks, twWaitDiv, twWait);
+    mk(blocks, twWait, "control_wait", { DURATION: blockInput(twWaitDiv) }, {});
+
+    mk(blocks, twIfWait, "control_if", {
+      CONDITION: boolInput(twCondAnd),
+      SUBSTACK: substackInput(twWait),
+    }, {});
+    setParent(blocks, twWait, twIfWait);
+
+    // e. change __font_i by 1
+    const twChangeI = uid();
+    mk(blocks, twChangeI, "data_changevariableby", { VALUE: numLit(1) },
+      { VARIABLE: ["__font_i", varI] });
+
+    // link repeat body: setChar → ifBS → ifWait → changeI
+    chain(blocks, [twSetChar, twIfBS, twIfWait, twChangeI]);
+
+    mk(blocks, twRepeat, "control_repeat", {
+      TIMES: blockInput(twLenDT, 10),
+      SUBSTACK: substackInput(twSetChar),
+    }, {});
+    setParent(blocks, twSetChar, twRepeat);
+
+    // 19. set __tw_running = 0
+    const twSetRunning0 = uid();
+    mk(blocks, twSetRunning0, "data_setvariableto", { VALUE: numLit(0) },
+      { VARIABLE: ["__tw_running", varTwRunning] });
+
+    // link full definition body
+    chain(blocks, [
+      twDefId,
+      twSetDT, twSetXIf, twSetYIf, twCallClear,
+      twSetRunning, twSetSkip0,
+      twSetSz, twSetCol, twSetBr, twSetGh,
+      twSetCurX, twSetCurY,
+      twApplySz, twApplyCol, twApplyBr, twApplyGh,
+      twSetI, twRepeat, twSetRunning0,
+    ]);
+
+    // When [space] key pressed: if __tw_running = 1 → set __tw_skip = 1
+    const twSpaceHat = uid();
+    mk(blocks, twSpaceHat, "event_whenkeypressed", {}, { KEY_OPTION: ["space", null] }, true, false, [1200, 700]);
+
+    const twIfRunning = uid(), twRunCond = uid(), twRunVar = uid();
+    mk(blocks, twRunVar, "data_variable", {}, { VARIABLE: ["__tw_running", varTwRunning] });
+    setParent(blocks, twRunVar, twRunCond);
+    mk(blocks, twRunCond, "operator_equals", {
+      OPERAND1: blockInput(twRunVar),
+      OPERAND2: numLit(1),
+    }, {});
+    setParent(blocks, twRunCond, twIfRunning);
+
+    const twSetSkipToOne = uid();
+    mk(blocks, twSetSkipToOne, "data_setvariableto", { VALUE: numLit(1) },
+      { VARIABLE: ["__tw_skip", varTwSkip] });
+
+    mk(blocks, twIfRunning, "control_if", {
+      CONDITION: boolInput(twRunCond),
+      SUBSTACK: substackInput(twSetSkipToOne),
+    }, {});
+    setParent(blocks, twSetSkipToOne, twIfRunning);
+
+    chain(blocks, [twSpaceHat, twIfRunning]);
+  }
+
+  // ── Script 8: Number format utility blocks (§18) ──────────────────────────
+  // All four blocks use warpStr (inherited from options.warp).
+  //
+  // Result is always stored in __fmt_result.
+  //
+  // Arg IDs for zeroPad are declared here so that the timer block can call
+  // zeroPad and correctly reference those argument IDs in the call mutation.
+  const padArgNumId = uid();
+  const padArgDigId = uid();
+  {
+    // ── §18-A: __font_fmt_zeroPad %s %s ──────────────────────────────────────
+    // Pads a number string with leading zeros to reach the given digit width.
+    const zpProtoId = uid(), zpDefId = uid();
+    const zpArgNumShadow = uid(), zpArgDigShadow = uid();
+    mk(blocks, zpArgNumShadow, "argument_reporter_string_number", {}, { VALUE: ["number", null] }, false, true);
+    setParent(blocks, zpArgNumShadow, zpProtoId);
+    mk(blocks, zpArgDigShadow, "argument_reporter_string_number", {}, { VALUE: ["digits", null] }, false, true);
+    setParent(blocks, zpArgDigShadow, zpProtoId);
+
+    mk(blocks, zpProtoId, "procedures_prototype",
+      {
+        [padArgNumId]: [1, zpArgNumShadow],
+        [padArgDigId]: [1, zpArgDigShadow],
+      },
+      {},
+      false, true, undefined,
+      {
+        tagName: "mutation",
+        children: [],
+        proccode: "__font_fmt_zeroPad %s %s",
+        argumentids: JSON.stringify([padArgNumId, padArgDigId]),
+        argumentnames: JSON.stringify(["number", "digits"]),
+        argumentdefaults: JSON.stringify(["0", "2"]),
+        warp: warpStr,
+      });
+    setParent(blocks, zpProtoId, zpDefId);
+    mk(blocks, zpDefId, "procedures_definition", { custom_block: [1, zpProtoId] }, {}, true, false, [800, 1200]);
+
+    // set __fmt_result = number_arg
+    const zpSetResult = uid(), zpNumArg = uid();
+    mk(blocks, zpNumArg, "argument_reporter_string_number", {}, { VALUE: ["number", null] });
+    setParent(blocks, zpNumArg, zpSetResult);
+    mk(blocks, zpSetResult, "data_setvariableto",
+      { VALUE: blockInputStr(zpNumArg) },
+      { VARIABLE: ["__fmt_result", varFmtResult] });
+
+    // repeat until (length of __fmt_result) >= digits_arg
+    const zpRepeatUntil = uid();
+    const zpCondGe = uid(), zpCondNot = uid(), zpCondLt = uid();
+    const zpLenRes = uid(), zpLenResVar = uid();
+    mk(blocks, zpLenResVar, "data_variable", {}, { VARIABLE: ["__fmt_result", varFmtResult] });
+    setParent(blocks, zpLenResVar, zpLenRes);
+    mk(blocks, zpLenRes, "operator_length", { STRING: blockInputStr(zpLenResVar) }, {});
+    setParent(blocks, zpLenRes, zpCondGe);
+    const zpDigArg = uid();
+    mk(blocks, zpDigArg, "argument_reporter_string_number", {}, { VALUE: ["digits", null] });
+    setParent(blocks, zpDigArg, zpCondGe);
+    // length >= digits  ≡  NOT (length < digits)
+    mk(blocks, zpCondLt, "operator_lt", {
+      OPERAND1: blockInput(zpLenRes),
+      OPERAND2: blockInput(zpDigArg),
+    }, {});
+    setParent(blocks, zpLenRes, zpCondLt);
+    setParent(blocks, zpDigArg, zpCondLt);
+    mk(blocks, zpCondNot, "operator_not", { OPERAND: boolInput(zpCondLt) }, {});
+    setParent(blocks, zpCondLt, zpCondNot);
+    setParent(blocks, zpCondNot, zpRepeatUntil);
+
+    // body: set __fmt_result = join("0", __fmt_result)
+    const zpJoin = uid(), zpResVar = uid();
+    mk(blocks, zpResVar, "data_variable", {}, { VARIABLE: ["__fmt_result", varFmtResult] });
+    setParent(blocks, zpResVar, zpJoin);
+    mk(blocks, zpJoin, "operator_join", {
+      STRING1: strLit("0"),
+      STRING2: blockInputStr(zpResVar),
+    }, {});
+    const zpSetPad = uid();
+    setParent(blocks, zpJoin, zpSetPad);
+    mk(blocks, zpSetPad, "data_setvariableto",
+      { VALUE: blockInputStr(zpJoin) },
+      { VARIABLE: ["__fmt_result", varFmtResult] });
+
+    mk(blocks, zpRepeatUntil, "control_repeat_until", {
+      CONDITION: boolInput(zpCondNot),
+      SUBSTACK: substackInput(zpSetPad),
+    }, {});
+    setParent(blocks, zpSetPad, zpRepeatUntil);
+
+    chain(blocks, [zpDefId, zpSetResult, zpRepeatUntil]);
+
+    // ── §18-B: __font_fmt_comma %s ────────────────────────────────────────────
+    // Formats a number with thousands-separator commas.
+    const cmArgNumId = uid();
+    const cmProtoId = uid(), cmDefId = uid();
+    const cmArgNumShadow = uid();
+    mk(blocks, cmArgNumShadow, "argument_reporter_string_number", {}, { VALUE: ["number", null] }, false, true);
+    setParent(blocks, cmArgNumShadow, cmProtoId);
+
+    mk(blocks, cmProtoId, "procedures_prototype",
+      { [cmArgNumId]: [1, cmArgNumShadow] },
+      {},
+      false, true, undefined,
+      {
+        tagName: "mutation",
+        children: [],
+        proccode: "__font_fmt_comma %s",
+        argumentids: JSON.stringify([cmArgNumId]),
+        argumentnames: JSON.stringify(["number"]),
+        argumentdefaults: JSON.stringify(["0"]),
+        warp: warpStr,
+      });
+    setParent(blocks, cmProtoId, cmDefId);
+    mk(blocks, cmDefId, "procedures_definition", { custom_block: [1, cmProtoId] }, {}, true, false, [800, 1500]);
+
+    // set __fmt_str = number_arg
+    const cmSetStr = uid(), cmNumArg = uid();
+    mk(blocks, cmNumArg, "argument_reporter_string_number", {}, { VALUE: ["number", null] });
+    setParent(blocks, cmNumArg, cmSetStr);
+    mk(blocks, cmSetStr, "data_setvariableto",
+      { VALUE: blockInputStr(cmNumArg) },
+      { VARIABLE: ["__fmt_str", varFmtStr] });
+
+    // set __fmt_result = ""
+    const cmSetResult = uid();
+    mk(blocks, cmSetResult, "data_setvariableto", { VALUE: strLit("") },
+      { VARIABLE: ["__fmt_result", varFmtResult] });
+
+    // set __fmt_i = 1
+    const cmSetI = uid();
+    mk(blocks, cmSetI, "data_setvariableto", { VALUE: numLit(1) },
+      { VARIABLE: ["__fmt_i", varFmtI] });
+
+    // repeat (length of __fmt_str) times
+    const cmRepeat = uid();
+    const cmLenStr = uid(), cmLenStrVar = uid();
+    mk(blocks, cmLenStrVar, "data_variable", {}, { VARIABLE: ["__fmt_str", varFmtStr] });
+    setParent(blocks, cmLenStrVar, cmLenStr);
+    mk(blocks, cmLenStr, "operator_length", { STRING: blockInputStr(cmLenStrVar) }, {});
+    setParent(blocks, cmLenStr, cmRepeat);
+
+    // set __fmt_pos = (length of __fmt_str) - __fmt_i + 1
+    const cmSetPos = uid();
+    const cmFmtIPosVar = uid(), cmLenStr2 = uid(), cmLenStr2Var = uid();
+    mk(blocks, cmLenStr2Var, "data_variable", {}, { VARIABLE: ["__fmt_str", varFmtStr] });
+    setParent(blocks, cmLenStr2Var, cmLenStr2);
+    mk(blocks, cmLenStr2, "operator_length", { STRING: blockInputStr(cmLenStr2Var) }, {});
+    mk(blocks, cmFmtIPosVar, "data_variable", {}, { VARIABLE: ["__fmt_i", varFmtI] });
+    const cmPosSub = uid();
+    setParent(blocks, cmLenStr2, cmPosSub);
+    setParent(blocks, cmFmtIPosVar, cmPosSub);
+    mk(blocks, cmPosSub, "operator_subtract", {
+      NUM1: blockInput(cmLenStr2),
+      NUM2: blockInput(cmFmtIPosVar),
+    }, {});
+    const cmPosAdd = uid();
+    setParent(blocks, cmPosSub, cmPosAdd);
+    mk(blocks, cmPosAdd, "operator_add", { NUM1: blockInput(cmPosSub), NUM2: numLit(1) }, {});
+    setParent(blocks, cmPosAdd, cmSetPos);
+    mk(blocks, cmSetPos, "data_setvariableto",
+      { VALUE: blockInput(cmPosAdd) },
+      { VARIABLE: ["__fmt_pos", varFmtPos] });
+
+    // if (__fmt_i > 1) and ((__fmt_i - 1) mod 3 = 0): prepend ","
+    const cmIfComma = uid(), cmCondAnd = uid();
+    const cmCondGt1 = uid(), cmFmtIGtVar = uid();
+    mk(blocks, cmFmtIGtVar, "data_variable", {}, { VARIABLE: ["__fmt_i", varFmtI] });
+    setParent(blocks, cmFmtIGtVar, cmCondGt1);
+    mk(blocks, cmCondGt1, "operator_gt", {
+      OPERAND1: blockInput(cmFmtIGtVar),
+      OPERAND2: numLit(1),
+    }, {});
+    setParent(blocks, cmCondGt1, cmCondAnd);
+
+    // (__fmt_i - 1) mod 3 = 0
+    const cmCondMod0 = uid(), cmMod = uid(), cmIMinus1 = uid(), cmFmtISub1 = uid();
+    mk(blocks, cmFmtISub1, "data_variable", {}, { VARIABLE: ["__fmt_i", varFmtI] });
+    setParent(blocks, cmFmtISub1, cmIMinus1);
+    mk(blocks, cmIMinus1, "operator_subtract", { NUM1: blockInput(cmFmtISub1), NUM2: numLit(1) }, {});
+    setParent(blocks, cmIMinus1, cmMod);
+    mk(blocks, cmMod, "operator_mod", { NUM1: blockInput(cmIMinus1), NUM2: numLit(3) }, {});
+    setParent(blocks, cmMod, cmCondMod0);
+    mk(blocks, cmCondMod0, "operator_equals", {
+      OPERAND1: blockInput(cmMod),
+      OPERAND2: numLit(0),
+    }, {});
+    setParent(blocks, cmCondMod0, cmCondAnd);
+
+    mk(blocks, cmCondAnd, "operator_and", {
+      OPERAND1: boolInput(cmCondGt1),
+      OPERAND2: boolInput(cmCondMod0),
+    }, {});
+    setParent(blocks, cmCondAnd, cmIfComma);
+
+    // body: set __fmt_result = join(",", __fmt_result)
+    const cmJoinComma = uid(), cmResVarC = uid();
+    mk(blocks, cmResVarC, "data_variable", {}, { VARIABLE: ["__fmt_result", varFmtResult] });
+    setParent(blocks, cmResVarC, cmJoinComma);
+    mk(blocks, cmJoinComma, "operator_join", {
+      STRING1: strLit(","),
+      STRING2: blockInputStr(cmResVarC),
+    }, {});
+    const cmPrependComma = uid();
+    setParent(blocks, cmJoinComma, cmPrependComma);
+    mk(blocks, cmPrependComma, "data_setvariableto",
+      { VALUE: blockInputStr(cmJoinComma) },
+      { VARIABLE: ["__fmt_result", varFmtResult] });
+
+    mk(blocks, cmIfComma, "control_if", {
+      CONDITION: boolInput(cmCondAnd),
+      SUBSTACK: substackInput(cmPrependComma),
+    }, {});
+    setParent(blocks, cmPrependComma, cmIfComma);
+
+    // set __fmt_result = join(letter __fmt_pos of __fmt_str, __fmt_result)
+    const cmLetterPos = uid(), cmFmtPosVar = uid(), cmFmtStrVar = uid();
+    mk(blocks, cmFmtPosVar, "data_variable", {}, { VARIABLE: ["__fmt_pos", varFmtPos] });
+    mk(blocks, cmFmtStrVar, "data_variable", {}, { VARIABLE: ["__fmt_str", varFmtStr] });
+    setParent(blocks, cmFmtPosVar, cmLetterPos);
+    setParent(blocks, cmFmtStrVar, cmLetterPos);
+    mk(blocks, cmLetterPos, "operator_letter_of", {
+      LETTER: blockInput(cmFmtPosVar, 1),
+      STRING: blockInputStr(cmFmtStrVar),
+    }, {});
+    const cmJoinLetter = uid(), cmResVarL = uid();
+    mk(blocks, cmResVarL, "data_variable", {}, { VARIABLE: ["__fmt_result", varFmtResult] });
+    setParent(blocks, cmResVarL, cmJoinLetter);
+    setParent(blocks, cmLetterPos, cmJoinLetter);
+    mk(blocks, cmJoinLetter, "operator_join", {
+      STRING1: blockInputStr(cmLetterPos),
+      STRING2: blockInputStr(cmResVarL),
+    }, {});
+    const cmSetResLetter = uid();
+    setParent(blocks, cmJoinLetter, cmSetResLetter);
+    mk(blocks, cmSetResLetter, "data_setvariableto",
+      { VALUE: blockInputStr(cmJoinLetter) },
+      { VARIABLE: ["__fmt_result", varFmtResult] });
+
+    // change __fmt_i by 1
+    const cmChangeI = uid();
+    mk(blocks, cmChangeI, "data_changevariableby", { VALUE: numLit(1) },
+      { VARIABLE: ["__fmt_i", varFmtI] });
+
+    chain(blocks, [cmSetPos, cmIfComma, cmSetResLetter, cmChangeI]);
+
+    mk(blocks, cmRepeat, "control_repeat", {
+      TIMES: blockInput(cmLenStr, 10),
+      SUBSTACK: substackInput(cmSetPos),
+    }, {});
+    setParent(blocks, cmSetPos, cmRepeat);
+
+    chain(blocks, [cmDefId, cmSetStr, cmSetResult, cmSetI, cmRepeat]);
+
+    // ── §18-C: __font_fmt_timer %s ────────────────────────────────────────────
+    // Converts a total-seconds value to "MM:SS" format.
+    const tmArgSecId = uid();
+    const tmProtoId = uid(), tmDefId = uid();
+    const tmArgSecShadow = uid();
+    mk(blocks, tmArgSecShadow, "argument_reporter_string_number", {}, { VALUE: ["totalSeconds", null] }, false, true);
+    setParent(blocks, tmArgSecShadow, tmProtoId);
+
+    mk(blocks, tmProtoId, "procedures_prototype",
+      { [tmArgSecId]: [1, tmArgSecShadow] },
+      {},
+      false, true, undefined,
+      {
+        tagName: "mutation",
+        children: [],
+        proccode: "__font_fmt_timer %s",
+        argumentids: JSON.stringify([tmArgSecId]),
+        argumentnames: JSON.stringify(["totalSeconds"]),
+        argumentdefaults: JSON.stringify(["0"]),
+        warp: warpStr,
+      });
+    setParent(blocks, tmProtoId, tmDefId);
+    mk(blocks, tmDefId, "procedures_definition", { custom_block: [1, tmProtoId] }, {}, true, false, [800, 1800]);
+
+    // set __fmt_min = floor(totalSeconds / 60)
+    const tmSetMin = uid(), tmFloorMin = uid(), tmDivMin = uid(), tmSecArgDiv = uid();
+    mk(blocks, tmSecArgDiv, "argument_reporter_string_number", {}, { VALUE: ["totalSeconds", null] });
+    setParent(blocks, tmSecArgDiv, tmDivMin);
+    mk(blocks, tmDivMin, "operator_divide", {
+      NUM1: blockInput(tmSecArgDiv),
+      NUM2: numLit(60),
+    }, {});
+    setParent(blocks, tmDivMin, tmFloorMin);
+    mk(blocks, tmFloorMin, "operator_mathop", { NUM: blockInput(tmDivMin) }, { OPERATOR: ["floor", null] });
+    setParent(blocks, tmFloorMin, tmSetMin);
+    mk(blocks, tmSetMin, "data_setvariableto",
+      { VALUE: blockInput(tmFloorMin) },
+      { VARIABLE: ["__fmt_min", varFmtMin] });
+
+    // set __fmt_sec = totalSeconds mod 60
+    const tmSetSec = uid(), tmModSec = uid(), tmSecArgMod = uid();
+    mk(blocks, tmSecArgMod, "argument_reporter_string_number", {}, { VALUE: ["totalSeconds", null] });
+    setParent(blocks, tmSecArgMod, tmModSec);
+    mk(blocks, tmModSec, "operator_mod", {
+      NUM1: blockInput(tmSecArgMod),
+      NUM2: numLit(60),
+    }, {});
+    setParent(blocks, tmModSec, tmSetSec);
+    mk(blocks, tmSetSec, "data_setvariableto",
+      { VALUE: blockInput(tmModSec) },
+      { VARIABLE: ["__fmt_sec", varFmtSec] });
+
+    // call __font_fmt_zeroPad(__fmt_min, 2)
+    const tmCallPadMin = uid();
+    const tmPadMinNumSh = uid(), tmPadMinDigSh = uid();
+    mk(blocks, tmPadMinNumSh, "argument_reporter_string_number", {}, { VALUE: ["number", null] }, false, true);
+    mk(blocks, tmPadMinDigSh, "argument_reporter_string_number", {}, { VALUE: ["digits", null] }, false, true);
+    setParent(blocks, tmPadMinNumSh, tmCallPadMin);
+    setParent(blocks, tmPadMinDigSh, tmCallPadMin);
+    const tmMinVar = uid();
+    mk(blocks, tmMinVar, "data_variable", {}, { VARIABLE: ["__fmt_min", varFmtMin] });
+    setParent(blocks, tmMinVar, tmCallPadMin);
+    mk(blocks, tmCallPadMin, "procedures_call", {
+      [padArgNumId]: [3, tmMinVar, tmPadMinNumSh],
+      [padArgDigId]: [3, [P_NUM, "2"], tmPadMinDigSh],
+    }, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: "__font_fmt_zeroPad %s %s",
+      argumentids: JSON.stringify([padArgNumId, padArgDigId]),
+      warp: warpStr,
+    });
+
+    // set __fmt_min_str = __fmt_result
+    const tmSetMinStr = uid(), tmResVarMin = uid();
+    mk(blocks, tmResVarMin, "data_variable", {}, { VARIABLE: ["__fmt_result", varFmtResult] });
+    setParent(blocks, tmResVarMin, tmSetMinStr);
+    mk(blocks, tmSetMinStr, "data_setvariableto",
+      { VALUE: blockInputStr(tmResVarMin) },
+      { VARIABLE: ["__fmt_min_str", varFmtMinStr] });
+
+    // call __font_fmt_zeroPad(__fmt_sec, 2)
+    const tmCallPadSec = uid();
+    const tmPadSecNumSh = uid(), tmPadSecDigSh = uid();
+    mk(blocks, tmPadSecNumSh, "argument_reporter_string_number", {}, { VALUE: ["number", null] }, false, true);
+    mk(blocks, tmPadSecDigSh, "argument_reporter_string_number", {}, { VALUE: ["digits", null] }, false, true);
+    setParent(blocks, tmPadSecNumSh, tmCallPadSec);
+    setParent(blocks, tmPadSecDigSh, tmCallPadSec);
+    const tmSecVar = uid();
+    mk(blocks, tmSecVar, "data_variable", {}, { VARIABLE: ["__fmt_sec", varFmtSec] });
+    setParent(blocks, tmSecVar, tmCallPadSec);
+    mk(blocks, tmCallPadSec, "procedures_call", {
+      [padArgNumId]: [3, tmSecVar, tmPadSecNumSh],
+      [padArgDigId]: [3, [P_NUM, "2"], tmPadSecDigSh],
+    }, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: "__font_fmt_zeroPad %s %s",
+      argumentids: JSON.stringify([padArgNumId, padArgDigId]),
+      warp: warpStr,
+    });
+
+    // set __fmt_result = join(__fmt_min_str, join(":", __fmt_result))
+    const tmSetResult = uid();
+    const tmJoinColon = uid(), tmResVarSec = uid();
+    mk(blocks, tmResVarSec, "data_variable", {}, { VARIABLE: ["__fmt_result", varFmtResult] });
+    setParent(blocks, tmResVarSec, tmJoinColon);
+    mk(blocks, tmJoinColon, "operator_join", {
+      STRING1: strLit(":"),
+      STRING2: blockInputStr(tmResVarSec),
+    }, {});
+    const tmMinStrVar = uid();
+    mk(blocks, tmMinStrVar, "data_variable", {}, { VARIABLE: ["__fmt_min_str", varFmtMinStr] });
+    const tmJoinFull = uid();
+    setParent(blocks, tmMinStrVar, tmJoinFull);
+    setParent(blocks, tmJoinColon, tmJoinFull);
+    mk(blocks, tmJoinFull, "operator_join", {
+      STRING1: blockInputStr(tmMinStrVar),
+      STRING2: blockInputStr(tmJoinColon),
+    }, {});
+    setParent(blocks, tmJoinFull, tmSetResult);
+    mk(blocks, tmSetResult, "data_setvariableto",
+      { VALUE: blockInputStr(tmJoinFull) },
+      { VARIABLE: ["__fmt_result", varFmtResult] });
+
+    chain(blocks, [tmDefId, tmSetMin, tmSetSec, tmCallPadMin, tmSetMinStr, tmCallPadSec, tmSetResult]);
+
+    // ── §18-D: __font_fmt_fixed %s %s ────────────────────────────────────────
+    // Formats a number to a fixed number of decimal places.
+    // Uses a loop to compute factor = 10^decimals (no exponent operator in Scratch).
+    const fxArgNumId = uid(), fxArgDecId = uid();
+    const fxProtoId = uid(), fxDefId = uid();
+    const fxArgNumShadow = uid(), fxArgDecShadow = uid();
+    mk(blocks, fxArgNumShadow, "argument_reporter_string_number", {}, { VALUE: ["number", null] }, false, true);
+    setParent(blocks, fxArgNumShadow, fxProtoId);
+    mk(blocks, fxArgDecShadow, "argument_reporter_string_number", {}, { VALUE: ["decimals", null] }, false, true);
+    setParent(blocks, fxArgDecShadow, fxProtoId);
+
+    mk(blocks, fxProtoId, "procedures_prototype",
+      {
+        [fxArgNumId]: [1, fxArgNumShadow],
+        [fxArgDecId]: [1, fxArgDecShadow],
+      },
+      {},
+      false, true, undefined,
+      {
+        tagName: "mutation",
+        children: [],
+        proccode: "__font_fmt_fixed %s %s",
+        argumentids: JSON.stringify([fxArgNumId, fxArgDecId]),
+        argumentnames: JSON.stringify(["number", "decimals"]),
+        argumentdefaults: JSON.stringify(["0", "2"]),
+        warp: warpStr,
+      });
+    setParent(blocks, fxProtoId, fxDefId);
+    mk(blocks, fxDefId, "procedures_definition", { custom_block: [1, fxProtoId] }, {}, true, false, [800, 2100]);
+
+    // set __fmt_factor = 1
+    const fxSetFactor = uid();
+    mk(blocks, fxSetFactor, "data_setvariableto", { VALUE: numLit(1) },
+      { VARIABLE: ["__fmt_factor", varFmtFactor] });
+
+    // repeat decimals_arg times: set __fmt_factor = __fmt_factor * 10
+    const fxRepeat = uid(), fxDecArg = uid();
+    mk(blocks, fxDecArg, "argument_reporter_string_number", {}, { VALUE: ["decimals", null] });
+    setParent(blocks, fxDecArg, fxRepeat);
+
+    const fxMul = uid(), fxFactorVar = uid();
+    mk(blocks, fxFactorVar, "data_variable", {}, { VARIABLE: ["__fmt_factor", varFmtFactor] });
+    setParent(blocks, fxFactorVar, fxMul);
+    mk(blocks, fxMul, "operator_multiply", {
+      NUM1: blockInput(fxFactorVar),
+      NUM2: numLit(10),
+    }, {});
+    const fxSetFactor2 = uid();
+    setParent(blocks, fxMul, fxSetFactor2);
+    mk(blocks, fxSetFactor2, "data_setvariableto",
+      { VALUE: blockInput(fxMul) },
+      { VARIABLE: ["__fmt_factor", varFmtFactor] });
+
+    mk(blocks, fxRepeat, "control_repeat", {
+      TIMES: blockInput(fxDecArg, 0),
+      SUBSTACK: substackInput(fxSetFactor2),
+    }, {});
+    setParent(blocks, fxSetFactor2, fxRepeat);
+
+    // set __fmt_int = floor(number_arg * __fmt_factor)
+    const fxSetInt = uid(), fxFloor = uid(), fxMulNum = uid();
+    const fxNumArg = uid(), fxFactorVar2 = uid();
+    mk(blocks, fxNumArg, "argument_reporter_string_number", {}, { VALUE: ["number", null] });
+    mk(blocks, fxFactorVar2, "data_variable", {}, { VARIABLE: ["__fmt_factor", varFmtFactor] });
+    setParent(blocks, fxNumArg, fxMulNum);
+    setParent(blocks, fxFactorVar2, fxMulNum);
+    mk(blocks, fxMulNum, "operator_multiply", {
+      NUM1: blockInput(fxNumArg),
+      NUM2: blockInput(fxFactorVar2),
+    }, {});
+    setParent(blocks, fxMulNum, fxFloor);
+    mk(blocks, fxFloor, "operator_mathop", { NUM: blockInput(fxMulNum) }, { OPERATOR: ["floor", null] });
+    setParent(blocks, fxFloor, fxSetInt);
+    mk(blocks, fxSetInt, "data_setvariableto",
+      { VALUE: blockInput(fxFloor) },
+      { VARIABLE: ["__fmt_int", varFmtInt] });
+
+    // set __fmt_result = join(floor(__fmt_int / __fmt_factor), join(".", __fmt_int mod __fmt_factor))
+    // inner: __fmt_int mod __fmt_factor
+    const fxModFrac = uid(), fxIntVarMod = uid(), fxFactorVarMod = uid();
+    mk(blocks, fxIntVarMod, "data_variable", {}, { VARIABLE: ["__fmt_int", varFmtInt] });
+    mk(blocks, fxFactorVarMod, "data_variable", {}, { VARIABLE: ["__fmt_factor", varFmtFactor] });
+    setParent(blocks, fxIntVarMod, fxModFrac);
+    setParent(blocks, fxFactorVarMod, fxModFrac);
+    mk(blocks, fxModFrac, "operator_mod", {
+      NUM1: blockInput(fxIntVarMod),
+      NUM2: blockInput(fxFactorVarMod),
+    }, {});
+
+    // join(".", frac)
+    const fxJoinDot = uid();
+    setParent(blocks, fxModFrac, fxJoinDot);
+    mk(blocks, fxJoinDot, "operator_join", {
+      STRING1: strLit("."),
+      STRING2: blockInputStr(fxModFrac),
+    }, {});
+
+    // floor(__fmt_int / __fmt_factor)
+    const fxDivInt = uid(), fxIntVarDiv = uid(), fxFactorVarDiv = uid(), fxFloorInt = uid();
+    mk(blocks, fxIntVarDiv, "data_variable", {}, { VARIABLE: ["__fmt_int", varFmtInt] });
+    mk(blocks, fxFactorVarDiv, "data_variable", {}, { VARIABLE: ["__fmt_factor", varFmtFactor] });
+    setParent(blocks, fxIntVarDiv, fxDivInt);
+    setParent(blocks, fxFactorVarDiv, fxDivInt);
+    mk(blocks, fxDivInt, "operator_divide", {
+      NUM1: blockInput(fxIntVarDiv),
+      NUM2: blockInput(fxFactorVarDiv),
+    }, {});
+    setParent(blocks, fxDivInt, fxFloorInt);
+    mk(blocks, fxFloorInt, "operator_mathop", { NUM: blockInput(fxDivInt) }, { OPERATOR: ["floor", null] });
+
+    // join(flooredInt, join(".", frac))
+    const fxJoinFull = uid();
+    setParent(blocks, fxFloorInt, fxJoinFull);
+    setParent(blocks, fxJoinDot, fxJoinFull);
+    mk(blocks, fxJoinFull, "operator_join", {
+      STRING1: blockInputStr(fxFloorInt),
+      STRING2: blockInputStr(fxJoinDot),
+    }, {});
+
+    const fxSetResult = uid();
+    setParent(blocks, fxJoinFull, fxSetResult);
+    mk(blocks, fxSetResult, "data_setvariableto",
+      { VALUE: blockInputStr(fxJoinFull) },
+      { VARIABLE: ["__fmt_result", varFmtResult] });
+
+    chain(blocks, [fxDefId, fxSetFactor, fxRepeat, fxSetInt, fxSetResult]);
+  }
+
   // ── Assemble variables for FontChar sprite ──
   const fontCharVariables: Record<string, [string, string | number]> = {
     [varBsResult]: ["__font_bsearch_result", ""],
@@ -1161,6 +2180,20 @@ export function generateScratchProject(
     [varAlign]: ["__font_align", options.align ?? "left"],
     [varTotalWidth]: ["__font_totalWidth", 0],
     [varJ]: ["__font_j", 0],
+    // Typewriter effect variables (§17)
+    [varTwRunning]: ["__tw_running", 0],
+    [varTwSkip]: ["__tw_skip", 0],
+    [varTwChar]: ["__tw_char", ""],
+    // Number format variables (§18)
+    [varFmtResult]: ["__fmt_result", ""],
+    [varFmtStr]: ["__fmt_str", ""],
+    [varFmtI]: ["__fmt_i", 0],
+    [varFmtPos]: ["__fmt_pos", 0],
+    [varFmtMin]: ["__fmt_min", 0],
+    [varFmtSec]: ["__fmt_sec", 0],
+    [varFmtFactor]: ["__fmt_factor", 1],
+    [varFmtInt]: ["__fmt_int", 0],
+    [varFmtMinStr]: ["__fmt_min_str", ""],
   };
 
   // ── Assemble targets ──
