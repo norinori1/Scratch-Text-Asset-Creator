@@ -1,3 +1,21 @@
+export interface ScratchExportOptions {
+  /** warp（画面を再描画せずに実行）を有効にするか（デフォルト: true） */
+  warp: boolean;
+  /** コスチュームの出力フォーマット（デフォルト: "svg"） */
+  outputFormat: "svg" | "png";
+  /** 描画方式: クローン式 or ペン式（デフォルト: "clone"） */
+  renderMode: "clone" | "pen";
+  /** テキストの揃え方（デフォルト: "left"） */
+  alignment: "left" | "center" | "right";
+}
+
+export const DEFAULT_SCRATCH_EXPORT_OPTIONS: ScratchExportOptions = {
+  warp: true,
+  outputFormat: "svg",
+  renderMode: "clone",
+  alignment: "left",
+};
+
 export type CharsetId =
   | "ascii"
   | "hiragana"

@@ -1,6 +1,7 @@
 import { create } from "zustand";
 import type opentype from "opentype.js";
-import type { CharsetId, GlyphAsset, GlyphRenderOptions } from "../types";
+import type { CharsetId, GlyphAsset, GlyphRenderOptions, ScratchExportOptions } from "../types";
+import { DEFAULT_SCRATCH_EXPORT_OPTIONS } from "../types";
 
 interface AppState {
   font: opentype.Font | null;
@@ -8,6 +9,7 @@ interface AppState {
   selectedCharsetIds: CharsetId[];
   customChars: string;
   renderOptions: GlyphRenderOptions;
+  scratchExportOptions: ScratchExportOptions;
   glyphAssets: GlyphAsset[];
   isRasterizing: boolean;
   exportProgress: number;
@@ -19,6 +21,7 @@ interface AppState {
   setCharsetIds: (ids: CharsetId[]) => void;
   setCustomChars: (chars: string) => void;
   setRenderOptions: (opts: Partial<GlyphRenderOptions>) => void;
+  setScratchExportOptions: (opts: Partial<ScratchExportOptions>) => void;
   setGlyphAssets: (assets: GlyphAsset[]) => void;
   setIsRasterizing: (v: boolean) => void;
   setExportProgress: (current: number, total: number, phase: string) => void;
@@ -36,6 +39,7 @@ export const useAppStore = create<AppState>((set) => ({
     foreground: "#000000",
     background: null,
   },
+  scratchExportOptions: { ...DEFAULT_SCRATCH_EXPORT_OPTIONS },
   glyphAssets: [],
   isRasterizing: false,
   exportProgress: 0,
@@ -53,6 +57,8 @@ export const useAppStore = create<AppState>((set) => ({
   setCustomChars: (chars) => set({ customChars: chars }),
   setRenderOptions: (opts) =>
     set((s) => ({ renderOptions: { ...s.renderOptions, ...opts } })),
+  setScratchExportOptions: (opts) =>
+    set((s) => ({ scratchExportOptions: { ...s.scratchExportOptions, ...opts } })),
   setGlyphAssets: (assets) => set({ glyphAssets: assets }),
   setIsRasterizing: (v) => set({ isRasterizing: v }),
   setExportProgress: (current, total, phase) =>

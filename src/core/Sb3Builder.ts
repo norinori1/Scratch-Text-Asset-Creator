@@ -1,7 +1,8 @@
 import JSZip from "jszip";
 import type opentype from "opentype.js";
-import type { GlyphRenderOptions } from "../types";
-import { rasterizeGlyphToPng } from "./GlyphRasterizer";
+import type { GlyphRenderOptions, ScratchExportOptions } from "../types";
+import { DEFAULT_SCRATCH_EXPORT_OPTIONS } from "../types";
+import { rasterizeGlyphToPng, rasterizeGlyphToSvg, computeGlyphCellSize } from "./GlyphRasterizer";
 import { md5Hex } from "../utils/md5";
 import { generateScratchProject, type GlyphInfo } from "./ScratchScriptGenerator";
 
@@ -16,7 +17,8 @@ export interface BuildProgress {
 export async function buildSb3(
   font: opentype.Font,
   chars: string[],
-  options: GlyphRenderOptions,
+  glyphOptions: GlyphRenderOptions,
+  exportOptions: ScratchExportOptions = DEFAULT_SCRATCH_EXPORT_OPTIONS,
   onProgress?: (p: BuildProgress) => void
 ): Promise<Blob> {
   const zip = new JSZip();
@@ -29,28 +31,50 @@ export async function buildSb3(
     rotationCenterY: number;
   }> = [];
   const glyphInfos: GlyphInfo[] = [];
+  const useSvg = exportOptions.outputFormat === "svg";
 
   onProgress?.({ current: 0, total: chars.length + 1, phase: "グリフをレンダリング中..." });
 
   for (let i = 0; i < chars.length; i++) {
     const char = chars[i];
-    const result = await rasterizeGlyphToPng(font, char, options);
-    if (!result) continue;
 
-    const { png, height, advanceWidth } = result;
-    const assetId = md5Hex(png);
-    const filename = `${assetId}.png`;
-
-    zip.file(filename, png);
-    costumes.push({
-      assetId,
-      name: char,
-      md5ext: filename,
-      dataFormat: "png",
-      rotationCenterX: 0,
-      rotationCenterY: Math.floor(height / 2),
-    });
-    glyphInfos.push({ char, advanceWidth });
+    if (useSvg) {
+      const result = rasterizeGlyphToSvg(font, char, glyphOptions);
+      if (!result) {
+        onProgress?.({ current: i + 1, total: chars.length + 1, phase: "グリフをレンダリング中..." });
+        continue;
+      }
+      const { svg, height, advanceWidth } = result;
+      const assetId = md5Hex(svg);
+      zip.file(`${assetId}.svg`, svg);
+      costumes.push({
+        assetId,
+        name: char,
+        md5ext: `${assetId}.svg`,
+        dataFormat: "svg",
+        rotationCenterX: 0,
+        rotationCenterY: Math.floor(height / 2),
+      });
+      glyphInfos.push({ char, advanceWidth });
+    } else {
+      const result = await rasterizeGlyphToPng(font, char, glyphOptions);
+      if (!result) {
+        onProgress?.({ current: i + 1, total: chars.length + 1, phase: "グリフをレンダリング中..." });
+        continue;
+      }
+      const { png, height, advanceWidth } = result;
+      const assetId = md5Hex(png);
+      zip.file(`${assetId}.png`, png);
+      costumes.push({
+        assetId,
+        name: char,
+        md5ext: `${assetId}.png`,
+        dataFormat: "png",
+        rotationCenterX: 0,
+        rotationCenterY: Math.floor(height / 2),
+      });
+      glyphInfos.push({ char, advanceWidth });
+    }
 
     onProgress?.({ current: i + 1, total: chars.length + 1, phase: "グリフをレンダリング中..." });
   }
@@ -61,7 +85,12 @@ export async function buildSb3(
 
   onProgress?.({ current: chars.length + 1, total: chars.length + 1, phase: "project.json を生成中..." });
 
-  const projectData = generateScratchProject(costumes, glyphInfos, backdropAssetId);
+  // 行送り量をフォントメトリクスから算出する
+  const { cellHeight } = computeGlyphCellSize(font, glyphOptions);
+
+  const projectData = generateScratchProject(
+    costumes, glyphInfos, backdropAssetId, exportOptions, cellHeight
+  );
   zip.file("project.json", JSON.stringify(projectData));
 
   return zip.generateAsync({ type: "blob" });

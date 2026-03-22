@@ -43,6 +43,18 @@ async function canvasToPng(canvas: HTMLCanvasElement | OffscreenCanvas): Promise
   return new Uint8Array(buf);
 }
 
+/** opentype.js の glyph からセルサイズを計算するユーティリティ */
+export function computeGlyphCellSize(
+  font: opentype.Font,
+  options: GlyphRenderOptions
+): { cellHeight: number; ascender: number; scale: number } {
+  const scale = options.fontSize / font.unitsPerEm;
+  const ascender = font.ascender * scale;
+  const descender = Math.abs(font.descender * scale);
+  const cellHeight = Math.ceil(ascender + descender) + options.padding * 2;
+  return { cellHeight, ascender, scale };
+}
+
 export interface RasterizeResult {
   assets: GlyphAsset[];
   skippedChars: string[];
@@ -53,14 +65,10 @@ export async function rasterizeGlyphs(
   chars: string[],
   options: GlyphRenderOptions
 ): Promise<RasterizeResult> {
-  const { fontSize, padding, foreground, background } = options;
+  const { padding, foreground, background } = options;
+  const { ascender, cellHeight, scale } = computeGlyphCellSize(font, options);
   const assets: GlyphAsset[] = [];
   const skippedChars: string[] = [];
-
-  const scale = fontSize / font.unitsPerEm;
-  const ascender = font.ascender * scale;
-  const descender = Math.abs(font.descender * scale);
-  const cellHeight = Math.ceil(ascender + descender) + padding * 2;
 
   for (const char of chars) {
     const glyph = font.charToGlyph(char);
@@ -84,7 +92,7 @@ export async function rasterizeGlyphs(
     }
 
     ctx.fillStyle = foreground;
-    const path = glyph.getPath(padding, padding + ascender, fontSize);
+    const path = glyph.getPath(padding, padding + ascender, options.fontSize);
     path.draw(ctx as CanvasRenderingContext2D);
 
     const pngDataUrl = await canvasToDataUrl(canvas);
@@ -113,11 +121,8 @@ export async function rasterizeGlyphToPng(
   char: string,
   options: GlyphRenderOptions
 ): Promise<RasterizePngResult | null> {
-  const { fontSize, padding, foreground, background } = options;
-  const scale = fontSize / font.unitsPerEm;
-  const ascender = font.ascender * scale;
-  const descender = Math.abs(font.descender * scale);
-  const cellHeight = Math.ceil(ascender + descender) + padding * 2;
+  const { padding, foreground, background } = options;
+  const { ascender, cellHeight, scale } = computeGlyphCellSize(font, options);
 
   const glyph = font.charToGlyph(char);
   if (!glyph || glyph.index === 0) return null;
@@ -137,9 +142,48 @@ export async function rasterizeGlyphToPng(
   }
 
   ctx.fillStyle = foreground;
-  const path = glyph.getPath(padding, padding + ascender, fontSize);
+  const path = glyph.getPath(padding, padding + ascender, options.fontSize);
   path.draw(ctx as CanvasRenderingContext2D);
 
   const png = await canvasToPng(canvas);
   return { png, width: cellWidth, height: cellHeight, advanceWidth: Math.ceil(advanceWidthScaled) };
+}
+
+export interface RasterizeSvgResult {
+  svg: Uint8Array;
+  width: number;
+  height: number;
+  advanceWidth: number;
+}
+
+/**
+ * グリフを SVG データとして生成する。
+ * opentype.js の Path.toPathData() を使ってパス文字列を取得し、
+ * 最小限の SVG ファイルとして返す。Scratch のベクターコスチュームとして使用可能。
+ */
+export function rasterizeGlyphToSvg(
+  font: opentype.Font,
+  char: string,
+  options: GlyphRenderOptions
+): RasterizeSvgResult | null {
+  const { padding, foreground } = options;
+  const { ascender, cellHeight, scale } = computeGlyphCellSize(font, options);
+
+  const glyph = font.charToGlyph(char);
+  if (!glyph || glyph.index === 0) return null;
+
+  const advanceWidthScaled = (glyph.advanceWidth ?? font.unitsPerEm) * scale;
+  const cellWidth = Math.ceil(advanceWidthScaled) + padding * 2;
+
+  const path = glyph.getPath(padding, padding + ascender, options.fontSize);
+  // opentype.js の Path には toPathData() メソッドがある
+  const pathData: string = (path as unknown as { toPathData: (d: number) => string }).toPathData(2);
+
+  const svgContent =
+    `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="${cellWidth}" height="${cellHeight}">` +
+    (pathData ? `<path fill="${foreground}" d="${pathData}"/>` : "") +
+    `</svg>`;
+
+  const svg = new TextEncoder().encode(svgContent);
+  return { svg, width: cellWidth, height: cellHeight, advanceWidth: Math.ceil(advanceWidthScaled) };
 }
