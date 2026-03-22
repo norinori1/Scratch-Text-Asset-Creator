@@ -33,7 +33,7 @@ export function md5Hex(data: Uint8Array): string {
   const bitLen = msgLen * 8;
 
   // Padding: 0x80, zeros, then 64-bit little-endian length
-  const padLen = ((msgLen + 8 >> 6) + 1) << 6;
+  const padLen = (((msgLen + 8) >> 6) + 1) << 6;
   const padded = new Uint8Array(padLen);
   padded.set(bytes);
   padded[msgLen] = 0x80;
