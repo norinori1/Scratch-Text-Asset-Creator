@@ -30,5 +30,7 @@ export function resolveCharList(
   customChars: string
 ): string[] {
   const combined = selectedCharsetIds.map((id) => CHARSET_MAP[id]).join("") + customChars;
-  return Array.from(new Set(Array.from(combined)));
+  const normalized = combined.normalize("NFC");
+  const chars = Array.from(normalized).filter((ch) => ch.trim() !== "");
+  return Array.from(new Set(chars));
 }

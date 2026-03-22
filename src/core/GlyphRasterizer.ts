@@ -25,9 +25,16 @@ async function canvasToDataUrl(canvas: HTMLCanvasElement | OffscreenCanvas): Pro
 
 async function canvasToPng(canvas: HTMLCanvasElement | OffscreenCanvas): Promise<Uint8Array> {
   if (canvas instanceof HTMLCanvasElement) {
-    return new Promise((resolve) => {
+    return new Promise((resolve, reject) => {
       canvas.toBlob((blob) => {
-        blob!.arrayBuffer().then((buf) => resolve(new Uint8Array(buf)));
+        if (!blob) {
+          reject(new Error("Failed to convert canvas to PNG blob"));
+          return;
+        }
+        blob
+          .arrayBuffer()
+          .then((buf) => resolve(new Uint8Array(buf)))
+          .catch(reject);
       }, "image/png");
     });
   }
@@ -94,11 +101,18 @@ export async function rasterizeGlyphs(
   return { assets, skippedChars };
 }
 
+export interface RasterizePngResult {
+  png: Uint8Array;
+  width: number;
+  height: number;
+  advanceWidth: number;
+}
+
 export async function rasterizeGlyphToPng(
   font: opentype.Font,
   char: string,
   options: GlyphRenderOptions
-): Promise<Uint8Array | null> {
+): Promise<RasterizePngResult | null> {
   const { fontSize, padding, foreground, background } = options;
   const scale = fontSize / font.unitsPerEm;
   const ascender = font.ascender * scale;
@@ -108,8 +122,8 @@ export async function rasterizeGlyphToPng(
   const glyph = font.charToGlyph(char);
   if (!glyph || glyph.index === 0) return null;
 
-  const advanceWidth = (glyph.advanceWidth ?? font.unitsPerEm) * scale;
-  const cellWidth = Math.ceil(advanceWidth) + padding * 2;
+  const advanceWidthScaled = (glyph.advanceWidth ?? font.unitsPerEm) * scale;
+  const cellWidth = Math.ceil(advanceWidthScaled) + padding * 2;
 
   const canvas = createCanvas(cellWidth, cellHeight);
   const ctx = canvas.getContext("2d") as CanvasRenderingContext2D | OffscreenCanvasRenderingContext2D | null;
@@ -126,5 +140,6 @@ export async function rasterizeGlyphToPng(
   const path = glyph.getPath(padding, padding + ascender, fontSize);
   path.draw(ctx as CanvasRenderingContext2D);
 
-  return canvasToPng(canvas);
+  const png = await canvasToPng(canvas);
+  return { png, width: cellWidth, height: cellHeight, advanceWidth: Math.ceil(advanceWidthScaled) };
 }

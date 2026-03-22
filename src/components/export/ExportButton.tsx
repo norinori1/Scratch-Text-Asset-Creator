@@ -25,7 +25,7 @@ export default function ExportButton() {
       a.href = url;
       a.download = fontFileName.replace(/\.[^.]+$/, "") + "_font.sb3";
       a.click();
-      URL.revokeObjectURL(url);
+      setTimeout(() => URL.revokeObjectURL(url), 0);
     } finally {
       setIsExporting(false);
       setExportProgress(0, 1, "");

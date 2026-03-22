@@ -11,6 +11,11 @@ export default function FontDropZone() {
 
   async function handleFile(file: File) {
     setError(null);
+    const MAX_SIZE = 30 * 1024 * 1024; // 30 MB
+    if (file.size > MAX_SIZE) {
+      setError("ファイルサイズが 30 MB を超えています。より小さいフォントファイルを選択してください。");
+      return;
+    }
     try {
       const font = await loadFontFromFile(file);
       setFont(font, file.name);
