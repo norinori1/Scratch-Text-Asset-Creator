@@ -47,7 +47,7 @@ export async function buildSb3(
       name: char,
       md5ext: filename,
       dataFormat: "png",
-      rotationCenterX: Math.floor(width / 2),
+      rotationCenterX: 0,
       rotationCenterY: Math.floor(height / 2),
     });
     glyphInfos.push({ char, advanceWidth });
