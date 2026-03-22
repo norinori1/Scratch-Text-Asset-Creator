@@ -5,6 +5,8 @@ import ColorPicker from "./ColorPicker";
 export default function SettingsPanel() {
   const renderOptions = useAppStore((s) => s.renderOptions);
   const setRenderOptions = useAppStore((s) => s.setRenderOptions);
+  const exportOptions = useAppStore((s) => s.exportOptions);
+  const setExportOptions = useAppStore((s) => s.setExportOptions);
 
   return (
     <div className="bg-white rounded-xl border border-gray-200 p-4 space-y-4">
@@ -38,6 +40,14 @@ export default function SettingsPanel() {
         value={renderOptions.background}
         onChange={(v) => setRenderOptions({ background: v })}
         nullable
+      />
+
+      <SizeSlider
+        label="文字間隔（デフォルト）"
+        min={-20}
+        max={64}
+        value={exportOptions.letterSpacing}
+        onChange={(v) => setExportOptions({ letterSpacing: v })}
       />
     </div>
   );

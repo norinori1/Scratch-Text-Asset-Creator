@@ -1,5 +1,14 @@
 import { describe, it, expect } from "vitest";
 import { generateScratchProject } from "../../src/core/ScratchScriptGenerator";
+import type { ExportOptions } from "../../src/types";
+
+const defaultOptions: ExportOptions = {
+  outputFormat: "svg",
+  warp: true,
+  renderMode: "clone",
+  align: "left",
+  letterSpacing: 0,
+};
 
 describe("generateScratchProject", () => {
   it("produces a project with two targets", () => {
@@ -78,5 +87,93 @@ describe("generateScratchProject", () => {
       .map((b) => (b.fields.BROADCAST_OPTION as [string])[0]);
     expect(broadcastHandlers).toContain("__font_render");
     expect(broadcastHandlers).toContain("__font_clear");
+  });
+
+  it("warp is true by default", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { blocks: Record<string, { opcode: string; mutation?: { warp: string } }> }[]
+    };
+    const sprite = project.targets[1];
+    const proto = Object.values(sprite.blocks).find((b) => b.opcode === "procedures_prototype" && b.mutation?.proccode?.includes("テキストを表示する"));
+    expect(proto?.mutation?.warp).toBe("true");
+  });
+
+  it("warp is false when specified in options", () => {
+    const opts: ExportOptions = { ...defaultOptions, warp: false };
+    const project = generateScratchProject([], [], "abc123", opts) as {
+      targets: { blocks: Record<string, { opcode: string; mutation?: { warp: string } }> }[]
+    };
+    const sprite = project.targets[1];
+    const proto = Object.values(sprite.blocks).find((b) => b.opcode === "procedures_prototype" && b.mutation?.proccode?.includes("テキストを表示する"));
+    expect(proto?.mutation?.warp).toBe("false");
+  });
+
+  it("テキストを表示する custom block has extended parameters", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { blocks: Record<string, { opcode: string; mutation?: { proccode: string } }> }[]
+    };
+    const sprite = project.targets[1];
+    const proto = Object.values(sprite.blocks).find((b) => b.opcode === "procedures_prototype" && b.mutation?.proccode?.includes("テキストを表示する"));
+    expect(proto?.mutation?.proccode).toContain("サイズ");
+    expect(proto?.mutation?.proccode).toContain("色");
+    expect(proto?.mutation?.proccode).toContain("明るさ");
+    expect(proto?.mutation?.proccode).toContain("透明度");
+    expect(proto?.mutation?.proccode).toContain("レイヤー");
+  });
+
+  it("テキストをすべてクリアする custom block is present", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { blocks: Record<string, { opcode: string; mutation?: { proccode: string } }> }[]
+    };
+    const sprite = project.targets[1];
+    const clearProto = Object.values(sprite.blocks).find(
+      (b) => b.opcode === "procedures_prototype" && b.mutation?.proccode === "テキストをすべてクリアする"
+    );
+    expect(clearProto).toBeDefined();
+  });
+
+  it("pen mode adds pen extension", () => {
+    const opts: ExportOptions = { ...defaultOptions, renderMode: "pen" };
+    const project = generateScratchProject([], [], "abc123", opts) as { extensions: string[] };
+    expect(project.extensions).toContain("pen");
+  });
+
+  it("clone mode does not add pen extension", () => {
+    const project = generateScratchProject([], [], "abc123", defaultOptions) as { extensions: string[] };
+    expect(project.extensions).not.toContain("pen");
+  });
+
+  it("sprite has size, color, brightness, ghost, layer variables", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { variables: Record<string, [string, string | number]> }[]
+    };
+    const sprite = project.targets[1];
+    const varNames = Object.values(sprite.variables).map(([name]) => name);
+    expect(varNames).toContain("__font_size");
+    expect(varNames).toContain("__font_color");
+    expect(varNames).toContain("__font_brightness");
+    expect(varNames).toContain("__font_ghost");
+    expect(varNames).toContain("__font_layer");
+    expect(varNames).toContain("__font_letterSpacing");
+    expect(varNames).toContain("__font_lineHeight");
+  });
+
+  it("__font_size defaults to 100", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { variables: Record<string, [string, string | number]> }[]
+    };
+    const sprite = project.targets[1];
+    const sizeEntry = Object.values(sprite.variables).find(([name]) => name === "__font_size");
+    expect(sizeEntry?.[1]).toBe(100);
+  });
+
+  it("__font_letterSpacing uses value from options", () => {
+    const opts: ExportOptions = { ...defaultOptions, letterSpacing: 5 };
+    const project = generateScratchProject([], [], "abc123", opts) as {
+      targets: { variables: Record<string, [string, string | number]> }[]
+    };
+    const sprite = project.targets[1];
+    const lsEntry = Object.values(sprite.variables).find(([name]) => name === "__font_letterSpacing");
+    expect(lsEntry?.[1]).toBe(5);
   });
 });

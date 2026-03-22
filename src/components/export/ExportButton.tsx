@@ -8,6 +8,7 @@ export default function ExportButton() {
   const selectedCharsetIds = useAppStore((s) => s.selectedCharsetIds);
   const customChars = useAppStore((s) => s.customChars);
   const renderOptions = useAppStore((s) => s.renderOptions);
+  const exportOptions = useAppStore((s) => s.exportOptions);
   const isExporting = useAppStore((s) => s.isExporting);
   const setIsExporting = useAppStore((s) => s.setIsExporting);
   const setExportProgress = useAppStore((s) => s.setExportProgress);
@@ -17,7 +18,7 @@ export default function ExportButton() {
     setIsExporting(true);
     const chars = resolveCharList(selectedCharsetIds, customChars);
     try {
-      const blob = await buildSb3(font, chars, renderOptions, (p) => {
+      const blob = await buildSb3(font, chars, renderOptions, exportOptions, (p) => {
         setExportProgress(p.current, p.total, p.phase);
       });
       const url = URL.createObjectURL(blob);

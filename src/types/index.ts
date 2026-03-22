@@ -35,6 +35,23 @@ export interface GlyphRenderOptions {
   canvasHeight?: number;
 }
 
+export type OutputFormat = "svg" | "png";
+export type RenderMode = "clone" | "pen";
+export type TextAlign = "left" | "center" | "right";
+
+export interface ExportOptions {
+  /** Costume image format: SVG (vector, smaller) or PNG (raster, compatible) */
+  outputFormat: OutputFormat;
+  /** Whether the custom block runs without screen refresh (warp=true is faster) */
+  warp: boolean;
+  /** Clone-based rendering (standard) or Pen/stamp-based rendering (faster for many chars) */
+  renderMode: RenderMode;
+  /** Default text alignment baked into the generated script */
+  align: TextAlign;
+  /** Default letter spacing (pixels) – sets the initial value of __font_letterSpacing */
+  letterSpacing: number;
+}
+
 export interface GlyphAsset {
   char: string;
   pngDataUrl: string;

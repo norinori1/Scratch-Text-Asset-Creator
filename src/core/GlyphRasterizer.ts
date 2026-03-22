@@ -108,6 +108,13 @@ export interface RasterizePngResult {
   advanceWidth: number;
 }
 
+export interface RasterizeSvgResult {
+  svg: Uint8Array;
+  width: number;
+  height: number;
+  advanceWidth: number;
+}
+
 export async function rasterizeGlyphToPng(
   font: opentype.Font,
   char: string,
@@ -142,4 +149,36 @@ export async function rasterizeGlyphToPng(
 
   const png = await canvasToPng(canvas);
   return { png, width: cellWidth, height: cellHeight, advanceWidth: Math.ceil(advanceWidthScaled) };
+}
+
+export function rasterizeGlyphToSvg(
+  font: opentype.Font,
+  char: string,
+  options: GlyphRenderOptions
+): RasterizeSvgResult | null {
+  const { fontSize, padding, foreground, background } = options;
+  const scale = fontSize / font.unitsPerEm;
+  const ascender = font.ascender * scale;
+  const descender = Math.abs(font.descender * scale);
+  const cellHeight = Math.ceil(ascender + descender) + padding * 2;
+
+  const glyph = font.charToGlyph(char);
+  if (!glyph || glyph.index === 0) return null;
+
+  const advanceWidthScaled = (glyph.advanceWidth ?? font.unitsPerEm) * scale;
+  const cellWidth = Math.ceil(advanceWidthScaled) + padding * 2;
+
+  const path = glyph.getPath(padding, padding + ascender, fontSize);
+  path.fill = foreground;
+  const pathElement = path.toSVG(2);
+
+  let svgContent = `<svg xmlns="http://www.w3.org/2000/svg" version="1.1" width="${cellWidth}" height="${cellHeight}">`;
+  if (background) {
+    svgContent += `<rect width="${cellWidth}" height="${cellHeight}" fill="${background}"/>`;
+  }
+  svgContent += pathElement;
+  svgContent += `</svg>`;
+
+  const svg = new TextEncoder().encode(svgContent);
+  return { svg, width: cellWidth, height: cellHeight, advanceWidth: Math.ceil(advanceWidthScaled) };
 }
