@@ -97,6 +97,11 @@ export async function buildSb3(
 
   onProgress?.({ current: chars.length + 1, total: chars.length + 1, phase: "project.json を生成中..." });
 
+  // §14.2: charMap は Unicode コードポイント昇順でソート済みであることをバイナリサーチが前提とする
+  glyphInfos.sort((a, b) => (a.char.codePointAt(0) ?? 0) - (b.char.codePointAt(0) ?? 0));
+  // costumes も同順にソートする（project.json 上の costume 順序を charMap と一致させる）
+  costumes.sort((a, b) => (a.name.codePointAt(0) ?? 0) - (b.name.codePointAt(0) ?? 0));
+
   const projectData = generateScratchProject(costumes, glyphInfos, backdropAssetId, exportOptions, cellHeight);
   zip.file("project.json", JSON.stringify(projectData));
 
