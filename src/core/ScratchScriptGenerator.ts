@@ -211,19 +211,11 @@ function buildRenderCharBlocks(
     Y: blockInput(bGotoYVar),
   }, {});
 
-  // show
-  const bShow = uid();
-  mk(blocks, bShow, "looks_show", {}, {});
-
   // create clone of myself
   const bClone = uid(), bCloneMenu = uid();
   mk(blocks, bCloneMenu, "control_create_clone_of_menu", {}, { CLONE_OPTION: ["_myself_", null] }, false, true);
   setParent(blocks, bCloneMenu, bClone);
   mk(blocks, bClone, "control_create_clone_of", { CLONE_OPTION: [1, bCloneMenu] }, {});
-
-  // hide
-  const bHide = uid();
-  mk(blocks, bHide, "looks_hide", {}, {});
 
   // change curX by (item (charIndex + 1) of charMap + letterSpacing)
   const bItemVal = mkItemOfList(blocks, varCharIndexId, varCharIndexName, "__font_charMap", listCharMapId);
@@ -242,7 +234,7 @@ function buildRenderCharBlocks(
     VALUE: blockInput(bAddLS),
   }, { VARIABLE: ["__font_curX", varCurXId] });
 
-  chain(blocks, [bSwitch, bGoto, bShow, bClone, bHide, bChangeX]);
+  chain(blocks, [bSwitch, bGoto, bClone, bChangeX]);
   return [bSwitch, bChangeX];
 }
 
@@ -331,14 +323,55 @@ export function generateScratchProject(
   const varLayer = uid();
   const varLetterSpacing = uid();
   const varLineHeight = uid();
+  const varAlign = uid();
+  const varTotalWidth = uid();
+  const varJ = uid();
   // listCharMap
   const listCharMap = uid();
+  // Stage-level lists (for all sprites)
+  const listFontConfig = uid();
+  const listInstruction = uid();
 
   // Pre-populate __font_charMap: [char, advanceWidth, char, advanceWidth, ...]
   const charMapData: (string | number)[] = [];
   for (const g of glyphInfos) {
     charMapData.push(g.char, g.advanceWidth);
   }
+
+  // Font_Config default values (index 1..9):
+  // 1=x, 2=y, 3=size, 4=color, 5=brightness, 6=ghost, 7=layer, 8=align, 9=letterSpacing
+  const fontConfigData: (string | number)[] = [
+    0,                               // [1] x default
+    0,                               // [2] y default
+    100,                             // [3] size default
+    0,                               // [4] color default
+    0,                               // [5] brightness default
+    0,                               // [6] ghost default
+    1,                               // [7] layer default
+    options.align ?? "left",         // [8] align default
+    options.letterSpacing ?? 0,      // [9] letterSpacing default
+  ];
+
+  // Instruction list contents (Japanese user manual)
+  const instructionData: string[] = [
+    "=== Font_Config の設定方法 ===",
+    "Font_Config[1]: x のデフォルト値",
+    "Font_Config[2]: y のデフォルト値",
+    "Font_Config[3]: サイズ のデフォルト値 (%)",
+    "Font_Config[4]: 色 のデフォルト値 (0-200)",
+    "Font_Config[5]: 明るさ のデフォルト値 (-100-100)",
+    "Font_Config[6]: 透明度 のデフォルト値 (0-100)",
+    "Font_Config[7]: レイヤー のデフォルト値 (1=前面 / -1=背面)",
+    "Font_Config[8]: 揃え のデフォルト値 (left/center/right)",
+    "Font_Config[9]: 文字間隔 のデフォルト値 (px)",
+    "=== テキストを表示する の使い方 ===",
+    "パラメーターを空にするとFont_Configの値が使われます",
+    "揃え: left(左)/center(中央)/right(右)",
+    "レイヤー: 1=前面, -1=背面 (その他の数値も有効)",
+    "改行コード: \\n で改行できます",
+    "=== テキストをすべてクリアする ===",
+    "表示中のテキストを全て消去します",
+  ];
 
   const blocks: Record<string, ScratchBlock> = {};
 
@@ -462,142 +495,169 @@ export function generateScratchProject(
     VALUE: blockInput(bYVar0),
   }, { VARIABLE: ["__font_curY", varCurY] });
 
-  // Pre-pass for center/right alignment:
-  // We build these blocks unconditionally; the "if align != left" check wraps them.
-  // For simplicity, we bake the alignment mode into the script using a constant comparison.
-  let bAlignAdjust: string | null = null;
-  if (options.align !== "left") {
-    // set totalWidth to 0  (reuse varI as temp counter j, with a dedicated totalWidth var)
-    // We'll use varCharIndex as totalWidth accumulator (safe since it's reset later)
-    const varTotalWidth = uid();
-    const varJ = uid();
+  // ── Dynamic alignment pre-pass (runtime if-else, always included) ──
+  // Structure: if NOT (__font_align = "left") { pre-pass + curX adjustment }
+  // Pre-pass: iterate displayText, accumulate totalWidth
+  // Adjustment: center → curX = x - totalWidth/2; right → curX = x - totalWidth
 
-    // set totalWidth to 0
-    const bSetTW = uid();
-    mk(blocks, bSetTW, "data_setvariableto", { VALUE: numLit(0) },
-      { VARIABLE: ["__font_totalWidth", varTotalWidth] });
+  // set totalWidth to 0
+  const bSetTW = uid();
+  mk(blocks, bSetTW, "data_setvariableto", { VALUE: numLit(0) },
+    { VARIABLE: ["__font_totalWidth", varTotalWidth] });
 
-    // set j to 1
-    const bSetJ = uid();
-    mk(blocks, bSetJ, "data_setvariableto", { VALUE: numLit(1) },
-      { VARIABLE: ["__font_j", varJ] });
+  // set j to 1
+  const bSetJ = uid();
+  mk(blocks, bSetJ, "data_setvariableto", { VALUE: numLit(1) },
+    { VARIABLE: ["__font_j", varJ] });
 
-    // length of __font_displayText
-    const bLenDT2 = uid(), bLenDTVar2 = uid();
-    mk(blocks, bLenDTVar2, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
-    setParent(blocks, bLenDTVar2, bLenDT2);
-    mk(blocks, bLenDT2, "operator_length", { STRING: blockInputStr(bLenDTVar2) }, {});
-    setParent(blocks, bLenDT2, uid()); // will be replaced by repeat parent
+  // inside pre-pass repeat:
+  // set ci2 to item# of (letter j of displayText) in charMap
+  const bSetCI2 = uid();
+  const bLetterJ = mkLetterOf(blocks, varJ, "__font_j", varDisplayText, "__font_displayText");
+  const bItemNum2 = mkItemNumOf(blocks, bLetterJ, "__font_charMap", listCharMap);
+  setParent(blocks, bItemNum2, bSetCI2);
+  mk(blocks, bSetCI2, "data_setvariableto",
+    { VALUE: blockInput(bItemNum2) },
+    { VARIABLE: ["__font_ci2", varCharIndex] }); // reuse varCharIndex as ci2
 
-    // inside pre-pass repeat:
-    // set ci to item# of (letter j of displayText) in charMap
-    const bSetCI2 = uid();
-    const bLetterJ = mkLetterOf(blocks, varJ, "__font_j", varDisplayText, "__font_displayText");
-    const bItemNum2 = mkItemNumOf(blocks, bLetterJ, "__font_charMap", listCharMap);
-    setParent(blocks, bItemNum2, bSetCI2);
-    mk(blocks, bSetCI2, "data_setvariableto",
-      { VALUE: blockInput(bItemNum2) },
-      { VARIABLE: ["__font_ci2", varCharIndex] }); // reuse varCharIndex as ci2
+  // if ci2 > 0: change totalWidth by advanceWidth + letterSpacing
+  const bIfCI2 = uid();
+  const bCondCI2 = uid(), bCondCI2Var = uid();
+  mk(blocks, bCondCI2Var, "data_variable", {}, { VARIABLE: ["__font_charIndex", varCharIndex] });
+  setParent(blocks, bCondCI2Var, bCondCI2);
+  mk(blocks, bCondCI2, "operator_gt", {
+    OPERAND1: blockInput(bCondCI2Var),
+    OPERAND2: numLit(0),
+  }, {});
+  setParent(blocks, bCondCI2, bIfCI2);
 
-    // if ci2 > 0: change totalWidth by advanceWidth + letterSpacing
-    const bIfCI2 = uid();
-    const bCondCI2 = uid(), bCondCI2Var = uid();
-    mk(blocks, bCondCI2Var, "data_variable", {}, { VARIABLE: ["__font_charIndex", varCharIndex] });
-    setParent(blocks, bCondCI2Var, bCondCI2);
-    mk(blocks, bCondCI2, "operator_gt", {
-      OPERAND1: blockInput(bCondCI2Var),
-      OPERAND2: numLit(0),
-    }, {});
-    setParent(blocks, bCondCI2, bIfCI2);
+  const bItemAdv = mkItemOfList(blocks, varCharIndex, "__font_charIndex", "__font_charMap", listCharMap);
+  const bLSVar2 = uid(), bAddLS2 = uid();
+  mk(blocks, bLSVar2, "data_variable", {}, { VARIABLE: ["__font_letterSpacing", varLetterSpacing] });
+  setParent(blocks, bLSVar2, bAddLS2);
+  setParent(blocks, bItemAdv, bAddLS2);
+  mk(blocks, bAddLS2, "operator_add", {
+    NUM1: blockInput(bItemAdv),
+    NUM2: blockInput(bLSVar2),
+  }, {});
+  const bChangeTW = uid();
+  setParent(blocks, bAddLS2, bChangeTW);
+  mk(blocks, bChangeTW, "data_changevariableby", {
+    VALUE: blockInput(bAddLS2),
+  }, { VARIABLE: ["__font_totalWidth", varTotalWidth] });
 
-    // advanceWidth = item(ci2 + 1) of charMap
-    const bItemAdv = mkItemOfList(blocks, varCharIndex, "__font_charIndex", "__font_charMap", listCharMap);
-    const bLSVar2 = uid(), bAddLS2 = uid();
-    mk(blocks, bLSVar2, "data_variable", {}, { VARIABLE: ["__font_letterSpacing", varLetterSpacing] });
-    setParent(blocks, bLSVar2, bAddLS2);
-    setParent(blocks, bItemAdv, bAddLS2);
-    mk(blocks, bAddLS2, "operator_add", {
-      NUM1: blockInput(bItemAdv),
-      NUM2: blockInput(bLSVar2),
-    }, {});
-    const bChangeTW = uid();
-    setParent(blocks, bAddLS2, bChangeTW);
-    mk(blocks, bChangeTW, "data_changevariableby", {
-      VALUE: blockInput(bAddLS2),
-    }, { VARIABLE: ["__font_totalWidth", varTotalWidth] });
+  mk(blocks, bIfCI2, "control_if", {
+    CONDITION: boolInput(bCondCI2),
+    SUBSTACK: substackInput(bChangeTW),
+  }, {});
+  setParent(blocks, bChangeTW, bIfCI2);
 
-    mk(blocks, bIfCI2, "control_if", {
-      CONDITION: boolInput(bCondCI2),
-      SUBSTACK: substackInput(bChangeTW),
-    }, {});
-    setParent(blocks, bChangeTW, bIfCI2);
+  // change j by 1
+  const bChangeJ = uid();
+  mk(blocks, bChangeJ, "data_changevariableby", { VALUE: numLit(1) },
+    { VARIABLE: ["__font_j", varJ] });
 
-    // change j by 1
-    const bChangeJ = uid();
-    mk(blocks, bChangeJ, "data_changevariableby", { VALUE: numLit(1) },
-      { VARIABLE: ["__font_j", varJ] });
+  chain(blocks, [bSetCI2, bIfCI2, bChangeJ]);
 
-    chain(blocks, [bSetCI2, bIfCI2, bChangeJ]);
+  // pre-pass repeat block
+  const bRepeatPre = uid();
+  const bLenDT2b = uid(), bLenDTVar2b = uid();
+  mk(blocks, bLenDTVar2b, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
+  setParent(blocks, bLenDTVar2b, bLenDT2b);
+  mk(blocks, bLenDT2b, "operator_length", { STRING: blockInputStr(bLenDTVar2b) }, {});
+  setParent(blocks, bLenDT2b, bRepeatPre);
+  mk(blocks, bRepeatPre, "control_repeat", {
+    TIMES: blockInput(bLenDT2b, 10),
+    SUBSTACK: substackInput(bSetCI2),
+  }, {});
+  setParent(blocks, bSetCI2, bRepeatPre);
 
-    // pre-pass repeat block
-    const bRepeatPre = uid();
-    const bLenDT2b = uid(), bLenDTVar2b = uid();
-    mk(blocks, bLenDTVar2b, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
-    setParent(blocks, bLenDTVar2b, bLenDT2b);
-    mk(blocks, bLenDT2b, "operator_length", { STRING: blockInputStr(bLenDTVar2b) }, {});
-    setParent(blocks, bLenDT2b, bRepeatPre);
-    mk(blocks, bRepeatPre, "control_repeat", {
-      TIMES: blockInput(bLenDT2b, 10),
-      SUBSTACK: substackInput(bSetCI2),
-    }, {});
-    setParent(blocks, bSetCI2, bRepeatPre);
+  // ── curX adjustment: if center → x - totalWidth/2; else (right) → x - totalWidth ──
+  // if __font_align = "center": center adjustment; else: right adjustment
+  const bAlignVarC = uid();
+  mk(blocks, bAlignVarC, "data_variable", {}, { VARIABLE: ["__font_align", varAlign] });
+  const bAlignEqCenter = uid();
+  mk(blocks, bAlignEqCenter, "operator_equals", {
+    OPERAND1: blockInputStr(bAlignVarC),
+    OPERAND2: strLit("center"),
+  }, {});
+  setParent(blocks, bAlignVarC, bAlignEqCenter);
 
-    // Adjust curX based on alignment: curX = x - totalWidth/2 (center) or x - totalWidth (right)
-    const bAdjust = uid();
-    const bXVarA = uid(), bTWVarA = uid();
-    mk(blocks, bXVarA, "data_variable", {}, { VARIABLE: ["__font_x", varX] });
-    mk(blocks, bTWVarA, "data_variable", {}, { VARIABLE: ["__font_totalWidth", varTotalWidth] });
+  // center: curX = x - totalWidth / 2
+  const bAdjustCenter = uid();
+  const bXVarC = uid(), bTWVarC = uid();
+  mk(blocks, bXVarC, "data_variable", {}, { VARIABLE: ["__font_x", varX] });
+  mk(blocks, bTWVarC, "data_variable", {}, { VARIABLE: ["__font_totalWidth", varTotalWidth] });
+  const bDiv2 = uid();
+  mk(blocks, bDiv2, "operator_divide", {
+    NUM1: blockInput(bTWVarC),
+    NUM2: numLit(2),
+  }, {});
+  setParent(blocks, bTWVarC, bDiv2);
+  const bHalf = uid();
+  mk(blocks, bHalf, "operator_subtract", {
+    NUM1: blockInput(bXVarC),
+    NUM2: blockInput(bDiv2),
+  }, {});
+  setParent(blocks, bXVarC, bHalf);
+  setParent(blocks, bDiv2, bHalf);
+  setParent(blocks, bHalf, bAdjustCenter);
+  mk(blocks, bAdjustCenter, "data_setvariableto", {
+    VALUE: blockInput(bHalf),
+  }, { VARIABLE: ["__font_curX", varCurX] });
 
-    if (options.align === "center") {
-      // curX = x - totalWidth / 2
-      const bHalf = uid(), bDiv2 = uid();
-      mk(blocks, bDiv2, "operator_divide", {
-        NUM1: blockInput(bTWVarA),
-        NUM2: numLit(2),
-      }, {});
-      setParent(blocks, bTWVarA, bDiv2);
-      mk(blocks, bHalf, "operator_subtract", {
-        NUM1: blockInput(bXVarA),
-        NUM2: blockInput(bDiv2),
-      }, {});
-      setParent(blocks, bXVarA, bHalf);
-      setParent(blocks, bDiv2, bHalf);
-      setParent(blocks, bHalf, bAdjust);
-      mk(blocks, bAdjust, "data_setvariableto", {
-        VALUE: blockInput(bHalf),
-      }, { VARIABLE: ["__font_curX", varCurX] });
-    } else {
-      // right: curX = x - totalWidth
-      const bSub = uid();
-      mk(blocks, bSub, "operator_subtract", {
-        NUM1: blockInput(bXVarA),
-        NUM2: blockInput(bTWVarA),
-      }, {});
-      setParent(blocks, bXVarA, bSub);
-      setParent(blocks, bTWVarA, bSub);
-      setParent(blocks, bSub, bAdjust);
-      mk(blocks, bAdjust, "data_setvariableto", {
-        VALUE: blockInput(bSub),
-      }, { VARIABLE: ["__font_curX", varCurX] });
-    }
+  // right: curX = x - totalWidth
+  const bAdjustRight = uid();
+  const bXVarR = uid(), bTWVarR = uid();
+  mk(blocks, bXVarR, "data_variable", {}, { VARIABLE: ["__font_x", varX] });
+  mk(blocks, bTWVarR, "data_variable", {}, { VARIABLE: ["__font_totalWidth", varTotalWidth] });
+  const bSub = uid();
+  mk(blocks, bSub, "operator_subtract", {
+    NUM1: blockInput(bXVarR),
+    NUM2: blockInput(bTWVarR),
+  }, {});
+  setParent(blocks, bXVarR, bSub);
+  setParent(blocks, bTWVarR, bSub);
+  setParent(blocks, bSub, bAdjustRight);
+  mk(blocks, bAdjustRight, "data_setvariableto", {
+    VALUE: blockInput(bSub),
+  }, { VARIABLE: ["__font_curX", varCurX] });
 
-    chain(blocks, [bSetTW, bSetJ, bRepeatPre, bAdjust]);
-    bAlignAdjust = bSetTW; // first block of the alignment pre-pass
-    // store reference to bAdjust for later chaining
+  // if-else for center vs right
+  const bIfElseAlign = uid();
+  mk(blocks, bIfElseAlign, "control_if_else", {
+    CONDITION: boolInput(bAlignEqCenter),
+    SUBSTACK: substackInput(bAdjustCenter),
+    SUBSTACK2: substackInput(bAdjustRight),
+  }, {});
+  setParent(blocks, bAlignEqCenter, bIfElseAlign);
+  setParent(blocks, bAdjustCenter, bIfElseAlign);
+  setParent(blocks, bAdjustRight, bIfElseAlign);
 
-    // Patch: ensure FontChar sprite has the extra variables
-    // They'll be added to the variables section below
-  }
+  chain(blocks, [bSetTW, bSetJ, bRepeatPre, bIfElseAlign]);
+
+  // ── Outer if: if NOT (__font_align = "left") { run pre-pass } ──
+  const bAlignVarL = uid();
+  mk(blocks, bAlignVarL, "data_variable", {}, { VARIABLE: ["__font_align", varAlign] });
+  const bAlignEqLeft = uid();
+  mk(blocks, bAlignEqLeft, "operator_equals", {
+    OPERAND1: blockInputStr(bAlignVarL),
+    OPERAND2: strLit("left"),
+  }, {});
+  setParent(blocks, bAlignVarL, bAlignEqLeft);
+  const bAlignNotLeft = uid();
+  mk(blocks, bAlignNotLeft, "operator_not", {
+    OPERAND: boolInput(bAlignEqLeft),
+  }, {});
+  setParent(blocks, bAlignEqLeft, bAlignNotLeft);
+
+  const bAlignIf = uid();
+  mk(blocks, bAlignIf, "control_if", {
+    CONDITION: boolInput(bAlignNotLeft),
+    SUBSTACK: substackInput(bSetTW),
+  }, {});
+  setParent(blocks, bAlignNotLeft, bAlignIf);
+  setParent(blocks, bSetTW, bAlignIf);
 
   // ── set i to 1 ──
   const bSetI = uid();
@@ -768,6 +828,31 @@ export function generateScratchProject(
   }, {});
   setParent(blocks, bIfBackslash, bRepeat);
 
+  // ── Warp helper block __font_doRender (always warp=true) ──
+  // Wrapping the rendering loop in a warp custom block ensures that all clone
+  // creation (or pen stamps) happen without screen refresh.  In clone mode this
+  // means every clone's "when I start as a clone" startup script is queued
+  // before any of them runs, so all characters become visible simultaneously
+  // in the same frame rather than appearing left-to-right one at a time.
+  const doRenderProcCode = "__font_doRender";
+  const doRenderProtoId = uid(), doRenderDefId = uid();
+  mk(blocks, doRenderProtoId, "procedures_prototype",
+    {}, {},
+    false, true, undefined,
+    {
+      tagName: "mutation",
+      children: [],
+      proccode: doRenderProcCode,
+      argumentids: JSON.stringify([]),
+      argumentnames: JSON.stringify([]),
+      argumentdefaults: JSON.stringify([]),
+      warp: "true",
+    });
+  setParent(blocks, doRenderProtoId, doRenderDefId);
+  mk(blocks, doRenderDefId, "procedures_definition",
+    { custom_block: [1, doRenderProtoId] }, {},
+    true, false, [400, -400]);
+
   // For pen mode, reset effects after the loop
   if (isPen) {
     const bResetSize = uid();
@@ -775,29 +860,91 @@ export function generateScratchProject(
     const bClearFX = uid();
     mk(blocks, bClearFX, "looks_cleargraphiceffects", {}, {});
     chain(blocks, [bRepeat, bResetSize, bClearFX]);
-
-    // Top-level render chain
-    const renderChain: string[] = [bRcvRender, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY];
-    if (bAlignAdjust) {
-      // We need to get last block of align pre-pass. For now skip for pen mode.
-    }
-    renderChain.push(bSetI, bRepeat, bResetSize);
-    // The chain already links bRepeat→bResetSize→bClearFX
-    chain(blocks, [bRcvRender, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY, bSetI, bRepeat]);
+    // Rendering blocks live under the warp helper definition
+    chain(blocks, [doRenderDefId, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY, bAlignIf, bSetI, bRepeat]);
   } else {
-    // Top-level render chain for clone mode
-    chain(blocks, [bRcvRender, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY, bSetI, bRepeat]);
+    // Rendering blocks live under the warp helper definition
+    chain(blocks, [doRenderDefId, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY, bAlignIf, bSetI, bRepeat]);
+  }
+
+  // __font_render broadcast handler: call the warp helper block
+  const bCallDoRenderFromBc = uid();
+  mk(blocks, bCallDoRenderFromBc, "procedures_call", {}, {}, false, false, undefined, {
+    tagName: "mutation",
+    children: [],
+    proccode: doRenderProcCode,
+    argumentids: JSON.stringify([]),
+    warp: "true",
+  });
+  chain(blocks, [bRcvRender, bCallDoRenderFromBc]);
+
+  // ── Helper: generate "if arg = '' → use Font_Config[index]; else → use arg" block ──
+  // Returns the id of the if-else block (top of this sub-chain)
+  function buildFontConfigLookup(
+    varId: string,
+    varName: string,
+    argName: string,
+    configIndex: number,
+    isStr = false,
+  ): string {
+    // argument reporter
+    const rArgCheck = uid();
+    mk(blocks, rArgCheck, "argument_reporter_string_number", {}, { VALUE: [argName, null] });
+
+    // condition: arg = ""
+    const bEqEmpty = uid();
+    mk(blocks, bEqEmpty, "operator_equals", {
+      OPERAND1: blockInputStr(rArgCheck),
+      OPERAND2: strLit(""),
+    }, {});
+    setParent(blocks, rArgCheck, bEqEmpty);
+
+    // then-branch: set var to item(configIndex) of Font_Config
+    const bItemCfg = uid();
+    mk(blocks, bItemCfg, "data_itemoflist", {
+      INDEX: numLit(configIndex),
+    }, { LIST: ["Font_Config", listFontConfig] });
+    const bSetFromCfg = uid();
+    mk(blocks, bSetFromCfg, "data_setvariableto", {
+      VALUE: isStr ? blockInputStr(bItemCfg) : blockInput(bItemCfg),
+    }, { VARIABLE: [varName, varId] });
+    setParent(blocks, bItemCfg, bSetFromCfg);
+
+    // else-branch: set var to arg
+    const rArgVal = uid();
+    mk(blocks, rArgVal, "argument_reporter_string_number", {}, { VALUE: [argName, null] });
+    const bSetFromArg = uid();
+    mk(blocks, bSetFromArg, "data_setvariableto", {
+      VALUE: isStr ? blockInputStr(rArgVal) : blockInput(rArgVal),
+    }, { VARIABLE: [varName, varId] });
+    setParent(blocks, rArgVal, bSetFromArg);
+
+    // if-else block
+    const bIfElse = uid();
+    mk(blocks, bIfElse, "control_if_else", {
+      CONDITION: boolInput(bEqEmpty),
+      SUBSTACK: substackInput(bSetFromCfg),
+      SUBSTACK2: substackInput(bSetFromArg),
+    }, {});
+    setParent(blocks, bEqEmpty, bIfElse);
+    setParent(blocks, bSetFromCfg, bIfElse);
+    setParent(blocks, bSetFromArg, bIfElse);
+
+    return bIfElse;
   }
 
   // ── Script 5: Custom block ── テキストを表示する ──
-  // Parameters: text %s, x %n, y %n, size %n, color %n, brightness %n, ghost %n, layer %n
-  const procCode = "テキストを表示する %s x: %n y: %n サイズ: %n 色: %n 明るさ: %n 透明度: %n レイヤー: %n";
+  // Parameters: text %s, x %s, y %s, size %s, color %s, brightness %s, ghost %s, layer %s, align %s, letterSpacing %s
+  // All non-text parameters use "" as default → Font_Config lookup inside the block body
+  const procCode = "テキストを表示する %s x: %s y: %s サイズ: %s 色: %s 明るさ: %s 透明度: %s レイヤー: %s 揃え: %s 文字間隔: %s";
   const argTextId = uid(), argXId = uid(), argYId = uid();
   const argSizeId = uid(), argColorId = uid(), argBrightId = uid(), argGhostId = uid(), argLayerId = uid();
+  const argAlignId = uid(), argLSId = uid();
   const protoId = uid(), defId = uid();
 
   const argTextShadow = uid(), argXShadow = uid(), argYShadow = uid();
   const argSizeShadow = uid(), argColorShadow = uid(), argBrightShadow = uid(), argGhostShadow = uid(), argLayerShadow = uid();
+  const argAlignShadow = uid(), argLSShadow = uid();
 
   mk(blocks, argTextShadow, "argument_reporter_string_number", {}, { VALUE: ["text", null] }, false, true);
   setParent(blocks, argTextShadow, protoId);
@@ -815,6 +962,10 @@ export function generateScratchProject(
   setParent(blocks, argGhostShadow, protoId);
   mk(blocks, argLayerShadow, "argument_reporter_string_number", {}, { VALUE: ["layer", null] }, false, true);
   setParent(blocks, argLayerShadow, protoId);
+  mk(blocks, argAlignShadow, "argument_reporter_string_number", {}, { VALUE: ["align", null] }, false, true);
+  setParent(blocks, argAlignShadow, protoId);
+  mk(blocks, argLSShadow, "argument_reporter_string_number", {}, { VALUE: ["letterSpacing", null] }, false, true);
+  setParent(blocks, argLSShadow, protoId);
 
   mk(blocks, protoId, "procedures_prototype",
     {
@@ -826,6 +977,8 @@ export function generateScratchProject(
       [argBrightId]: [1, argBrightShadow],
       [argGhostId]: [1, argGhostShadow],
       [argLayerId]: [1, argLayerShadow],
+      [argAlignId]: [1, argAlignShadow],
+      [argLSId]: [1, argLSShadow],
     },
     {},
     false, true, undefined,
@@ -833,52 +986,79 @@ export function generateScratchProject(
       tagName: "mutation",
       children: [],
       proccode: procCode,
-      argumentids: JSON.stringify([argTextId, argXId, argYId, argSizeId, argColorId, argBrightId, argGhostId, argLayerId]),
-      argumentnames: JSON.stringify(["text", "x", "y", "size", "color", "brightness", "ghost", "layer"]),
-      argumentdefaults: JSON.stringify(["", "0", "0", "100", "0", "0", "0", "1"]),
+      argumentids: JSON.stringify([argTextId, argXId, argYId, argSizeId, argColorId, argBrightId, argGhostId, argLayerId, argAlignId, argLSId]),
+      argumentnames: JSON.stringify(["text", "x", "y", "size", "color", "brightness", "ghost", "layer", "align", "letterSpacing"]),
+      argumentdefaults: JSON.stringify(["", "", "", "", "", "", "", "", "", ""]),
       warp: warpStr,
     });
   setParent(blocks, protoId, defId);
 
   mk(blocks, defId, "procedures_definition", { custom_block: [1, protoId] }, {}, true, false, [800, 0]);
 
-  // Block body: set __font_* variables from args, then broadcast clear + render
-  function makeSetFromArg(varId: string, varName: string, _argId: string, argName: string, isStr = false): string {
-    const bSet = uid(), rArg = uid();
-    mk(blocks, rArg, "argument_reporter_string_number", {}, { VALUE: [argName, null] });
-    setParent(blocks, rArg, bSet);
-    mk(blocks, bSet, "data_setvariableto",
-      { VALUE: isStr ? blockInputStr(rArg) : blockInput(rArg) },
-      { VARIABLE: [varName, varId] });
-    return bSet;
+  // Block body:
+  // 1. Set __font_displayText from "text" arg (always, no Font_Config fallback)
+  const bSetDT = uid(), rArgDT = uid();
+  mk(blocks, rArgDT, "argument_reporter_string_number", {}, { VALUE: ["text", null] });
+  setParent(blocks, rArgDT, bSetDT);
+  mk(blocks, bSetDT, "data_setvariableto",
+    { VALUE: blockInputStr(rArgDT) },
+    { VARIABLE: ["__font_displayText", varDisplayText] });
+
+  // 2. For each numeric/string parameter: if arg = "" → use Font_Config; else → use arg
+  //    Font_Config indices: 1=x, 2=y, 3=size, 4=color, 5=brightness, 6=ghost, 7=layer, 8=align, 9=letterSpacing
+  const bSetX = buildFontConfigLookup(varX, "__font_x", "x", 1);
+  const bSetY = buildFontConfigLookup(varY, "__font_y", "y", 2);
+  const bSetSizeVar = buildFontConfigLookup(varSize, "__font_size", "size", 3);
+  const bSetColorVar = buildFontConfigLookup(varColor, "__font_color", "color", 4);
+  const bSetBrightVar = buildFontConfigLookup(varBrightness, "__font_brightness", "brightness", 5);
+  const bSetGhostVar = buildFontConfigLookup(varGhost, "__font_ghost", "ghost", 6);
+  const bSetLayerVar = buildFontConfigLookup(varLayer, "__font_layer", "layer", 7);
+  const bSetAlignVar = buildFontConfigLookup(varAlign, "__font_align", "align", 8, true);
+  const bSetLSVar = buildFontConfigLookup(varLetterSpacing, "__font_letterSpacing", "letterSpacing", 9);
+
+  // 3. Clear existing text:
+  //    - Pen mode: call テキストをすべてクリアする directly (pen_eraseAll is instant, no empty frame)
+  //    - Clone mode: broadcast __font_clear WITHOUT wait, then immediately start rendering.
+  //      Clones created by __font_render did not exist when __font_clear was sent, so they
+  //      will NOT receive it. Old clones delete themselves concurrently with new clones being
+  //      rendered → no empty-screen frame → flicker-free even when called every frame.
+  let clearBlockId: string;
+  if (isPen) {
+    const bCallClear = uid();
+    mk(blocks, bCallClear, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: "テキストをすべてクリアする",
+      argumentids: JSON.stringify([]),
+      warp: warpStr,
+    });
+    clearBlockId = bCallClear;
+  } else {
+    // broadcast __font_clear (no wait) — old clones delete concurrently while new ones render
+    const bBcClearNW = uid(), bcClearNWMenu = uid();
+    mk(blocks, bcClearNWMenu, "event_broadcast_menu", {},
+      { BROADCAST_OPTION: ["__font_clear", broadcastClear] }, false, true);
+    setParent(blocks, bcClearNWMenu, bBcClearNW);
+    mk(blocks, bBcClearNW, "event_broadcast", { BROADCAST_INPUT: [1, bcClearNWMenu] }, {});
+    clearBlockId = bBcClearNW;
   }
 
-  const bSetDT = makeSetFromArg(varDisplayText, "__font_displayText", argTextId, "text", true);
-  const bSetX = makeSetFromArg(varX, "__font_x", argXId, "x");
-  const bSetY = makeSetFromArg(varY, "__font_y", argYId, "y");
-  const bSetSizeVar = makeSetFromArg(varSize, "__font_size", argSizeId, "size");
-  const bSetColorVar = makeSetFromArg(varColor, "__font_color", argColorId, "color");
-  const bSetBrightVar = makeSetFromArg(varBrightness, "__font_brightness", argBrightId, "brightness");
-  const bSetGhostVar = makeSetFromArg(varGhost, "__font_ghost", argGhostId, "ghost");
-  const bSetLayerVar = makeSetFromArg(varLayer, "__font_layer", argLayerId, "layer");
+  // 4. Call __font_doRender directly (warp=true → all characters appear simultaneously)
+  const bCallDoRender = uid();
+  mk(blocks, bCallDoRender, "procedures_call", {}, {}, false, false, undefined, {
+    tagName: "mutation",
+    children: [],
+    proccode: doRenderProcCode,
+    argumentids: JSON.stringify([]),
+    warp: "true",
+  });
 
-  // broadcast __font_clear and wait
-  const bBcClear = uid(), bcClearMenu = uid();
-  mk(blocks, bcClearMenu, "event_broadcast_menu", {},
-    { BROADCAST_OPTION: ["__font_clear", broadcastClear] }, false, true);
-  setParent(blocks, bcClearMenu, bBcClear);
-  mk(blocks, bBcClear, "event_broadcastandwait", { BROADCAST_INPUT: [1, bcClearMenu] }, {});
-
-  // broadcast __font_render and wait
-  const bBcRender = uid(), bcRenderMenu = uid();
-  mk(blocks, bcRenderMenu, "event_broadcast_menu", {},
-    { BROADCAST_OPTION: ["__font_render", broadcastRender] }, false, true);
-  setParent(blocks, bcRenderMenu, bBcRender);
-  mk(blocks, bBcRender, "event_broadcastandwait", { BROADCAST_INPUT: [1, bcRenderMenu] }, {});
-
-  chain(blocks, [defId, bSetDT, bSetX, bSetY, bSetSizeVar, bSetColorVar, bSetBrightVar, bSetGhostVar, bSetLayerVar, bBcClear, bBcRender]);
+  chain(blocks, [defId, bSetDT, bSetX, bSetY, bSetSizeVar, bSetColorVar, bSetBrightVar, bSetGhostVar, bSetLayerVar, bSetAlignVar, bSetLSVar, clearBlockId, bCallDoRender]);
 
   // ── Script 6: Custom block ── テキストをすべてクリアする ──
+  // This is the warp clear block called directly by テキストを表示する (no broadcast overhead)
+  // PEN mode: directly calls pen_eraseAll
+  // CLONE mode: broadcasts __font_clear and wait (so all clones can delete themselves)
   const clearProcCode = "テキストをすべてクリアする";
   const clearProtoId = uid(), clearDefId = uid();
 
@@ -897,16 +1077,22 @@ export function generateScratchProject(
     });
   setParent(blocks, clearProtoId, clearDefId);
 
-  mk(blocks, clearDefId, "procedures_definition", { custom_block: [1, clearProtoId] }, {}, true, false, [800, 400]);
+  mk(blocks, clearDefId, "procedures_definition", { custom_block: [1, clearProtoId] }, {}, true, false, [800, 500]);
 
-  // broadcast __font_clear and wait (reuse the same broadcast)
-  const bClearBc = uid(), bClearBcMenu = uid();
-  mk(blocks, bClearBcMenu, "event_broadcast_menu", {},
-    { BROADCAST_OPTION: ["__font_clear", broadcastClear] }, false, true);
-  setParent(blocks, bClearBcMenu, bClearBc);
-  mk(blocks, bClearBc, "event_broadcastandwait", { BROADCAST_INPUT: [1, bClearBcMenu] }, {});
-
-  chain(blocks, [clearDefId, bClearBc]);
+  if (isPen) {
+    // Pen mode: directly erase all pen marks (no broadcast needed)
+    const bEraseDirect = uid();
+    mk(blocks, bEraseDirect, "pen_eraseAll", {}, {});
+    chain(blocks, [clearDefId, bEraseDirect]);
+  } else {
+    // Clone mode: broadcast __font_clear and wait (each clone will delete itself)
+    const bClearBc = uid(), bClearBcMenu = uid();
+    mk(blocks, bClearBcMenu, "event_broadcast_menu", {},
+      { BROADCAST_OPTION: ["__font_clear", broadcastClear] }, false, true);
+    setParent(blocks, bClearBcMenu, bClearBc);
+    mk(blocks, bClearBc, "event_broadcastandwait", { BROADCAST_INPUT: [1, bClearBcMenu] }, {});
+    chain(blocks, [clearDefId, bClearBc]);
+  }
 
   // ── Assemble variables for FontChar sprite ──
   const fontCharVariables: Record<string, [string, string | number]> = {
@@ -923,6 +1109,9 @@ export function generateScratchProject(
     [varLayer]: ["__font_layer", 1],
     [varLetterSpacing]: ["__font_letterSpacing", options.letterSpacing ?? 0],
     [varLineHeight]: ["__font_lineHeight", lineHeight],
+    [varAlign]: ["__font_align", options.align ?? "left"],
+    [varTotalWidth]: ["__font_totalWidth", 0],
+    [varJ]: ["__font_j", 0],
   };
 
   // ── Assemble targets ──
@@ -962,7 +1151,10 @@ export function generateScratchProject(
     variables: {
       [varDisplayText]: ["__font_displayText", ""],
     },
-    lists: {},
+    lists: {
+      [listFontConfig]: ["Font_Config", fontConfigData],
+      [listInstruction]: ["取扱説明書", instructionData],
+    },
     broadcasts: {
       [broadcastRender]: "__font_render",
       [broadcastClear]: "__font_clear",

@@ -44,9 +44,9 @@ export default function ExportPanel() {
         )}
       </div>
 
-      {/* Text alignment */}
+      {/* Text alignment (Font_Config default) */}
       <div className="space-y-1">
-        <label className="text-sm font-medium text-gray-700">テキスト揃え（デフォルト）</label>
+        <label className="text-sm font-medium text-gray-700">テキスト揃え（Font_Configデフォルト）</label>
         <select
           value={exportOptions.align}
           onChange={(e) => setExportOptions({ align: e.target.value as "left" | "center" | "right" })}
@@ -56,6 +56,9 @@ export default function ExportPanel() {
           <option value="center">中央揃え</option>
           <option value="right">右揃え</option>
         </select>
+        <p className="text-xs text-gray-500">
+          Font_Config[8] の初期値になります。ブロック呼び出し時に揃えパラメーターで上書きできます。
+        </p>
       </div>
 
       {/* Warp toggle */}

@@ -108,7 +108,7 @@ describe("generateScratchProject", () => {
     expect(proto?.mutation?.warp).toBe("false");
   });
 
-  it("テキストを表示する custom block has extended parameters", () => {
+  it("テキストを表示する custom block has extended parameters including 揃え and 文字間隔", () => {
     const project = generateScratchProject([], [], "abc123") as {
       targets: { blocks: Record<string, { opcode: string; mutation?: { proccode: string } }> }[]
     };
@@ -119,6 +119,19 @@ describe("generateScratchProject", () => {
     expect(proto?.mutation?.proccode).toContain("明るさ");
     expect(proto?.mutation?.proccode).toContain("透明度");
     expect(proto?.mutation?.proccode).toContain("レイヤー");
+    expect(proto?.mutation?.proccode).toContain("揃え");
+    expect(proto?.mutation?.proccode).toContain("文字間隔");
+  });
+
+  it("テキストを表示する calls テキストをすべてクリアする via procedures_call (not broadcast)", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { blocks: Record<string, { opcode: string; mutation?: { proccode?: string } }> }[]
+    };
+    const sprite = project.targets[1];
+    const callBlock = Object.values(sprite.blocks).find(
+      (b) => b.opcode === "procedures_call" && b.mutation?.proccode === "テキストをすべてクリアする"
+    );
+    expect(callBlock).toBeDefined();
   });
 
   it("テキストをすべてクリアする custom block is present", () => {
@@ -130,6 +143,39 @@ describe("generateScratchProject", () => {
       (b) => b.opcode === "procedures_prototype" && b.mutation?.proccode === "テキストをすべてクリアする"
     );
     expect(clearProto).toBeDefined();
+  });
+
+  it("pen mode: テキストをすべてクリアする body uses pen_eraseAll directly (no __font_clear broadcast)", () => {
+    const opts: ExportOptions = { ...defaultOptions, renderMode: "pen" };
+    const project = generateScratchProject([], [], "abc123", opts) as {
+      targets: { blocks: Record<string, { opcode: string; next: string | null }> }[]
+    };
+    const sprite = project.targets[1];
+    const allDefs = Object.entries(sprite.blocks).filter(([, b]) => b.opcode === "procedures_definition");
+    let foundEraseAll = false;
+    for (const [, defBlock] of allDefs) {
+      if (defBlock.next && sprite.blocks[defBlock.next]?.opcode === "pen_eraseAll") {
+        foundEraseAll = true;
+        break;
+      }
+    }
+    expect(foundEraseAll).toBe(true);
+  });
+
+  it("clone mode: テキストをすべてクリアする body uses broadcast __font_clear and wait", () => {
+    const project = generateScratchProject([], [], "abc123", defaultOptions) as {
+      targets: { blocks: Record<string, { opcode: string; next: string | null; mutation?: { proccode?: string } }> }[]
+    };
+    const sprite = project.targets[1];
+    const allDefs = Object.entries(sprite.blocks).filter(([, b]) => b.opcode === "procedures_definition");
+    let foundBroadcastWait = false;
+    for (const [, defBlock] of allDefs) {
+      if (defBlock.next && sprite.blocks[defBlock.next]?.opcode === "event_broadcastandwait") {
+        foundBroadcastWait = true;
+        break;
+      }
+    }
+    expect(foundBroadcastWait).toBe(true);
   });
 
   it("pen mode adds pen extension", () => {
@@ -175,5 +221,87 @@ describe("generateScratchProject", () => {
     const sprite = project.targets[1];
     const lsEntry = Object.values(sprite.variables).find(([name]) => name === "__font_letterSpacing");
     expect(lsEntry?.[1]).toBe(5);
+  });
+
+  it("sprite has __font_align, __font_totalWidth, __font_j variables", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { variables: Record<string, [string, string | number]> }[]
+    };
+    const sprite = project.targets[1];
+    const varNames = Object.values(sprite.variables).map(([name]) => name);
+    expect(varNames).toContain("__font_align");
+    expect(varNames).toContain("__font_totalWidth");
+    expect(varNames).toContain("__font_j");
+  });
+
+  it("__font_align default matches options.align", () => {
+    const opts: ExportOptions = { ...defaultOptions, align: "center" };
+    const project = generateScratchProject([], [], "abc123", opts) as {
+      targets: { variables: Record<string, [string, string | number]> }[]
+    };
+    const sprite = project.targets[1];
+    const alignEntry = Object.values(sprite.variables).find(([name]) => name === "__font_align");
+    expect(alignEntry?.[1]).toBe("center");
+  });
+
+  it("stage has Font_Config list (for all sprites)", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { isStage: boolean; lists: Record<string, [string, (string | number)[]]> }[]
+    };
+    const stage = project.targets[0];
+    expect(stage.isStage).toBe(true);
+    const fontConfig = Object.values(stage.lists).find(([name]) => name === "Font_Config");
+    expect(fontConfig).toBeDefined();
+    expect(fontConfig![1]).toHaveLength(9);
+  });
+
+  it("Font_Config has correct default values from options", () => {
+    const opts: ExportOptions = { ...defaultOptions, align: "right", letterSpacing: 3 };
+    const project = generateScratchProject([], [], "abc123", opts) as {
+      targets: { isStage: boolean; lists: Record<string, [string, (string | number)[]]> }[]
+    };
+    const stage = project.targets[0];
+    const fontConfig = Object.values(stage.lists).find(([name]) => name === "Font_Config");
+    expect(fontConfig).toBeDefined();
+    const data = fontConfig![1];
+    // index 8 (0-based: 7) = align, index 9 (0-based: 8) = letterSpacing
+    expect(data[7]).toBe("right");   // Font_Config[8] = align
+    expect(data[8]).toBe(3);          // Font_Config[9] = letterSpacing
+    expect(data[2]).toBe(100);        // Font_Config[3] = size default
+  });
+
+  it("stage has 取扱説明書 instruction list (for all sprites)", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { isStage: boolean; lists: Record<string, [string, (string | number)[]]> }[]
+    };
+    const stage = project.targets[0];
+    expect(stage.isStage).toBe(true);
+    const instruction = Object.values(stage.lists).find(([name]) => name === "取扱説明書");
+    expect(instruction).toBeDefined();
+    expect((instruction![1] as string[]).length).toBeGreaterThan(0);
+  });
+
+  it("render script contains dynamic alignment blocks (operator_not and control_if)", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { blocks: Record<string, { opcode: string }> }[]
+    };
+    const sprite = project.targets[1];
+    const opcodes = Object.values(sprite.blocks).map((b) => b.opcode);
+    expect(opcodes).toContain("operator_not");
+    // Dynamic alignment always adds a control_if wrapping the pre-pass
+    expect(opcodes).toContain("control_if");
+    // And a control_if_else for center vs right
+    expect(opcodes).toContain("control_if_else");
+  });
+
+  it("テキストを表示する body uses Font_Config lookup (control_if_else blocks for each param)", () => {
+    const project = generateScratchProject([], [], "abc123") as {
+      targets: { blocks: Record<string, { opcode: string }> }[]
+    };
+    const sprite = project.targets[1];
+    // Font_Config lookup generates one control_if_else per non-text parameter (9 params)
+    const ifElseBlocks = Object.values(sprite.blocks).filter((b) => b.opcode === "control_if_else");
+    // At minimum: 9 Font_Config lookups (x,y,size,color,brightness,ghost,layer,align,letterSpacing) + 1 alignment (center vs right)
+    expect(ifElseBlocks.length).toBeGreaterThanOrEqual(10);
   });
 });
