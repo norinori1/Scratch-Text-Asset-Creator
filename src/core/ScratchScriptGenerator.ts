@@ -211,19 +211,11 @@ function buildRenderCharBlocks(
     Y: blockInput(bGotoYVar),
   }, {});
 
-  // show
-  const bShow = uid();
-  mk(blocks, bShow, "looks_show", {}, {});
-
   // create clone of myself
   const bClone = uid(), bCloneMenu = uid();
   mk(blocks, bCloneMenu, "control_create_clone_of_menu", {}, { CLONE_OPTION: ["_myself_", null] }, false, true);
   setParent(blocks, bCloneMenu, bClone);
   mk(blocks, bClone, "control_create_clone_of", { CLONE_OPTION: [1, bCloneMenu] }, {});
-
-  // hide
-  const bHide = uid();
-  mk(blocks, bHide, "looks_hide", {}, {});
 
   // change curX by (item (charIndex + 1) of charMap + letterSpacing)
   const bItemVal = mkItemOfList(blocks, varCharIndexId, varCharIndexName, "__font_charMap", listCharMapId);
@@ -242,7 +234,7 @@ function buildRenderCharBlocks(
     VALUE: blockInput(bAddLS),
   }, { VARIABLE: ["__font_curX", varCurXId] });
 
-  chain(blocks, [bSwitch, bGoto, bShow, bClone, bHide, bChangeX]);
+  chain(blocks, [bSwitch, bGoto, bClone, bChangeX]);
   return [bSwitch, bChangeX];
 }
 
@@ -988,15 +980,32 @@ export function generateScratchProject(
   const bSetAlignVar = buildFontConfigLookup(varAlign, "__font_align", "align", 8, true);
   const bSetLSVar = buildFontConfigLookup(varLetterSpacing, "__font_letterSpacing", "letterSpacing", 9);
 
-  // 3. Call テキストをすべてクリアする (warp custom block) instead of broadcasting __font_clear
-  const bCallClear = uid();
-  mk(blocks, bCallClear, "procedures_call", {}, {}, false, false, undefined, {
-    tagName: "mutation",
-    children: [],
-    proccode: "テキストをすべてクリアする",
-    argumentids: JSON.stringify([]),
-    warp: warpStr,
-  });
+  // 3. Clear existing text:
+  //    - Pen mode: call テキストをすべてクリアする directly (pen_eraseAll is instant, no empty frame)
+  //    - Clone mode: broadcast __font_clear WITHOUT wait, then immediately start rendering.
+  //      Clones created by __font_render did not exist when __font_clear was sent, so they
+  //      will NOT receive it. Old clones delete themselves concurrently with new clones being
+  //      rendered → no empty-screen frame → flicker-free even when called every frame.
+  let clearBlockId: string;
+  if (isPen) {
+    const bCallClear = uid();
+    mk(blocks, bCallClear, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: "テキストをすべてクリアする",
+      argumentids: JSON.stringify([]),
+      warp: warpStr,
+    });
+    clearBlockId = bCallClear;
+  } else {
+    // broadcast __font_clear (no wait) — old clones delete concurrently while new ones render
+    const bBcClearNW = uid(), bcClearNWMenu = uid();
+    mk(blocks, bcClearNWMenu, "event_broadcast_menu", {},
+      { BROADCAST_OPTION: ["__font_clear", broadcastClear] }, false, true);
+    setParent(blocks, bcClearNWMenu, bBcClearNW);
+    mk(blocks, bBcClearNW, "event_broadcast", { BROADCAST_INPUT: [1, bcClearNWMenu] }, {});
+    clearBlockId = bBcClearNW;
+  }
 
   // 4. broadcast __font_render and wait
   const bBcRender = uid(), bcRenderMenu = uid();
@@ -1005,7 +1014,7 @@ export function generateScratchProject(
   setParent(blocks, bcRenderMenu, bBcRender);
   mk(blocks, bBcRender, "event_broadcastandwait", { BROADCAST_INPUT: [1, bcRenderMenu] }, {});
 
-  chain(blocks, [defId, bSetDT, bSetX, bSetY, bSetSizeVar, bSetColorVar, bSetBrightVar, bSetGhostVar, bSetLayerVar, bSetAlignVar, bSetLSVar, bCallClear, bBcRender]);
+  chain(blocks, [defId, bSetDT, bSetX, bSetY, bSetSizeVar, bSetColorVar, bSetBrightVar, bSetGhostVar, bSetLayerVar, bSetAlignVar, bSetLSVar, clearBlockId, bBcRender]);
 
   // ── Script 6: Custom block ── テキストをすべてクリアする ──
   // This is the warp clear block called directly by テキストを表示する (no broadcast overhead)
