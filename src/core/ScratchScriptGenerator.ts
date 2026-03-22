@@ -1,4 +1,5 @@
 import type { ExportOptions } from "../types";
+import { generateBinarySearchBlocks, BSEARCH_PROC_CODE } from "./BinarySearchLookupGenerator";
 
 type BlockId = string;
 
@@ -184,9 +185,8 @@ function buildRenderCharBlocks(
   varIId: string,
   varDisplayTextId: string,
   varCurXId: string, varCurYId: string,
-  varCharIndexId: string, varCharIndexName: string,
+  varBsResultId: string,
   varLetterSpacingId: string, varLetterSpacingName: string,
-  listCharMapId: string,
 ): [string, string] {
   // switch costume to (letter i of displayText)
   const bSwitch = uid();
@@ -217,8 +217,10 @@ function buildRenderCharBlocks(
   setParent(blocks, bCloneMenu, bClone);
   mk(blocks, bClone, "control_create_clone_of", { CLONE_OPTION: [1, bCloneMenu] }, {});
 
-  // change curX by (item (charIndex + 1) of charMap + letterSpacing)
-  const bItemVal = mkItemOfList(blocks, varCharIndexId, varCharIndexName, "__font_charMap", listCharMapId);
+  // change curX by (__font_bsearch_result + letterSpacing)
+  const bBsResVar = uid();
+  mk(blocks, bBsResVar, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResultId] });
+  const bItemVal = bBsResVar;
 
   // (itemVal + letterSpacing)
   const bLSVar = uid(), bAddLS = uid(), bChangeX = uid();
@@ -244,9 +246,8 @@ function buildStampCharBlocks(
   varIId: string,
   varDisplayTextId: string,
   varCurXId: string, varCurYId: string,
-  varCharIndexId: string, varCharIndexName: string,
+  varBsResultId: string,
   varLetterSpacingId: string, varLetterSpacingName: string,
-  listCharMapId: string,
 ): [string, string] {
   // switch costume
   const bSwitch = uid();
@@ -275,8 +276,10 @@ function buildStampCharBlocks(
   const bStamp = uid();
   mk(blocks, bStamp, "pen_stamp", {}, {});
 
-  // change curX by (item (charIndex + 1) of charMap + letterSpacing)
-  const bItemVal = mkItemOfList(blocks, varCharIndexId, varCharIndexName, "__font_charMap", listCharMapId);
+  // change curX by (__font_bsearch_result + letterSpacing)
+  const bBsResVar = uid();
+  mk(blocks, bBsResVar, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResultId] });
+  const bItemVal = bBsResVar;
   const bLSVar = uid(), bAddLS = uid(), bChangeX = uid();
   mk(blocks, bLSVar, "data_variable", {}, { VARIABLE: [varLetterSpacingName, varLetterSpacingId] });
   setParent(blocks, bLSVar, bAddLS);
@@ -310,7 +313,12 @@ export function generateScratchProject(
   const broadcastClear = uid();
 
   // IDs for FontChar sprite variables
-  const varCharIndex = uid();
+  // Binary search variables (§14)
+  const varBsResult = uid();   // __font_bsearch_result
+  const varBsLo = uid();       // __bsLo
+  const varBsHi = uid();       // __bsHi
+  const varBsMid = uid();      // __bsMid
+  const varBsMidChar = uid();  // __bsMidChar
   const varX = uid();
   const varY = uid();
   const varI = uid();
@@ -374,6 +382,18 @@ export function generateScratchProject(
   ];
 
   const blocks: Record<string, ScratchBlock> = {};
+
+  // ── Binary search custom block (§14) ──────────────────────────────────────
+  const bsInfo = generateBinarySearchBlocks({
+    listCharMapId: listCharMap,
+    varBsResult,
+    varBsLo,
+    varBsHi,
+    varBsMid,
+    varBsMidChar,
+  }, warpStr, [1600, 0]);
+  Object.assign(blocks, bsInfo.blocks);
+  const bsArgTargetId = bsInfo.argTargetId;
 
   // ── Script 1: When flag clicked → hide (clone mode) or show (pen mode) ──
   const bFlag = uid(), bFlagAction = uid();
@@ -511,33 +531,47 @@ export function generateScratchProject(
     { VARIABLE: ["__font_j", varJ] });
 
   // inside pre-pass repeat:
-  // set ci2 to item# of (letter j of displayText) in charMap
-  const bSetCI2 = uid();
+  // call __font_bsearch (letter j of displayText)  → result in __font_bsearch_result
   const bLetterJ = mkLetterOf(blocks, varJ, "__font_j", varDisplayText, "__font_displayText");
-  const bItemNum2 = mkItemNumOf(blocks, bLetterJ, "__font_charMap", listCharMap);
-  setParent(blocks, bItemNum2, bSetCI2);
-  mk(blocks, bSetCI2, "data_setvariableto",
-    { VALUE: blockInput(bItemNum2) },
-    { VARIABLE: ["__font_ci2", varCharIndex] }); // reuse varCharIndex as ci2
+  const bPreCallShadow = uid();
+  mk(blocks, bPreCallShadow, "argument_reporter_string_number", {}, { VALUE: ["target", null] }, false, true);
+  const bPreCallBS = uid();
+  setParent(blocks, bLetterJ, bPreCallBS);
+  setParent(blocks, bPreCallShadow, bPreCallBS);
+  mk(blocks, bPreCallBS, "procedures_call", {
+    [bsArgTargetId]: [3, bLetterJ, bPreCallShadow],
+  }, {}, false, false, undefined, {
+    tagName: "mutation",
+    children: [],
+    proccode: BSEARCH_PROC_CODE,
+    argumentids: JSON.stringify([bsArgTargetId]),
+    warp: "true",
+  });
 
-  // if ci2 > 0: change totalWidth by advanceWidth + letterSpacing
-  const bIfCI2 = uid();
-  const bCondCI2 = uid(), bCondCI2Var = uid();
-  mk(blocks, bCondCI2Var, "data_variable", {}, { VARIABLE: ["__font_charIndex", varCharIndex] });
-  setParent(blocks, bCondCI2Var, bCondCI2);
-  mk(blocks, bCondCI2, "operator_gt", {
-    OPERAND1: blockInput(bCondCI2Var),
-    OPERAND2: numLit(0),
+  // if __font_bsearch_result ≠ "": change totalWidth by bsearch_result + letterSpacing
+  const bCondEq2 = uid(), bBsResVar2 = uid();
+  mk(blocks, bBsResVar2, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] });
+  setParent(blocks, bBsResVar2, bCondEq2);
+  mk(blocks, bCondEq2, "operator_equals", {
+    OPERAND1: blockInputStr(bBsResVar2),
+    OPERAND2: strLit(""),
   }, {});
-  setParent(blocks, bCondCI2, bIfCI2);
+  const bCondNotEmpty2 = uid();
+  setParent(blocks, bCondEq2, bCondNotEmpty2);
+  mk(blocks, bCondNotEmpty2, "operator_not", {
+    OPERAND: boolInput(bCondEq2),
+  }, {});
+  const bIfCI2 = uid();
+  setParent(blocks, bCondNotEmpty2, bIfCI2);
 
-  const bItemAdv = mkItemOfList(blocks, varCharIndex, "__font_charIndex", "__font_charMap", listCharMap);
+  const bBsAdvVar2 = uid();
+  mk(blocks, bBsAdvVar2, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] });
   const bLSVar2 = uid(), bAddLS2 = uid();
   mk(blocks, bLSVar2, "data_variable", {}, { VARIABLE: ["__font_letterSpacing", varLetterSpacing] });
+  setParent(blocks, bBsAdvVar2, bAddLS2);
   setParent(blocks, bLSVar2, bAddLS2);
-  setParent(blocks, bItemAdv, bAddLS2);
   mk(blocks, bAddLS2, "operator_add", {
-    NUM1: blockInput(bItemAdv),
+    NUM1: blockInput(bBsAdvVar2),
     NUM2: blockInput(bLSVar2),
   }, {});
   const bChangeTW = uid();
@@ -547,7 +581,7 @@ export function generateScratchProject(
   }, { VARIABLE: ["__font_totalWidth", varTotalWidth] });
 
   mk(blocks, bIfCI2, "control_if", {
-    CONDITION: boolInput(bCondCI2),
+    CONDITION: boolInput(bCondNotEmpty2),
     SUBSTACK: substackInput(bChangeTW),
   }, {});
   setParent(blocks, bChangeTW, bIfCI2);
@@ -557,7 +591,7 @@ export function generateScratchProject(
   mk(blocks, bChangeJ, "data_changevariableby", { VALUE: numLit(1) },
     { VARIABLE: ["__font_j", varJ] });
 
-  chain(blocks, [bSetCI2, bIfCI2, bChangeJ]);
+  chain(blocks, [bPreCallBS, bIfCI2, bChangeJ]);
 
   // pre-pass repeat block
   const bRepeatPre = uid();
@@ -568,9 +602,9 @@ export function generateScratchProject(
   setParent(blocks, bLenDT2b, bRepeatPre);
   mk(blocks, bRepeatPre, "control_repeat", {
     TIMES: blockInput(bLenDT2b, 10),
-    SUBSTACK: substackInput(bSetCI2),
+    SUBSTACK: substackInput(bPreCallBS),
   }, {});
-  setParent(blocks, bSetCI2, bRepeatPre);
+  setParent(blocks, bPreCallBS, bRepeatPre);
 
   // ── curX adjustment: if center → x - totalWidth/2; else (right) → x - totalWidth ──
   // if __font_align = "center": center adjustment; else: right adjustment
@@ -756,24 +790,37 @@ export function generateScratchProject(
   setParent(blocks, bResetCurX, bIfN);
 
   // Else branch (normal character):
-  //   set charIndex to item# of (letter i of displayText) in charMap
-  //   if charIndex > 0: render char
-  const bSetCI = uid();
+  //   call __font_bsearch (letter i of displayText)
+  //   if __font_bsearch_result ≠ "": render char
   const bLetterSearch = mkLetterOf(blocks, varI, "__font_i", varDisplayText, "__font_displayText");
-  const bItemNum = mkItemNumOf(blocks, bLetterSearch, "__font_charMap", listCharMap);
-  setParent(blocks, bItemNum, bSetCI);
-  mk(blocks, bSetCI, "data_setvariableto",
-    { VALUE: blockInput(bItemNum) },
-    { VARIABLE: ["__font_charIndex", varCharIndex] });
+  const bMainCallShadow = uid();
+  mk(blocks, bMainCallShadow, "argument_reporter_string_number", {}, { VALUE: ["target", null] }, false, true);
+  const bSetCI = uid(); // reuse name so chain/parent refs below still work
+  setParent(blocks, bLetterSearch, bSetCI);
+  setParent(blocks, bMainCallShadow, bSetCI);
+  mk(blocks, bSetCI, "procedures_call", {
+    [bsArgTargetId]: [3, bLetterSearch, bMainCallShadow],
+  }, {}, false, false, undefined, {
+    tagName: "mutation",
+    children: [],
+    proccode: BSEARCH_PROC_CODE,
+    argumentids: JSON.stringify([bsArgTargetId]),
+    warp: "true",
+  });
 
-  // if charIndex > 0: render
+  // if __font_bsearch_result ≠ "": render
   const bIfCI = uid();
-  const bCond = uid(), bCondVar = uid();
-  mk(blocks, bCondVar, "data_variable", {}, { VARIABLE: ["__font_charIndex", varCharIndex] });
-  setParent(blocks, bCondVar, bCond);
-  mk(blocks, bCond, "operator_gt", {
-    OPERAND1: blockInput(bCondVar),
-    OPERAND2: numLit(0),
+  const bCondEqMain = uid(), bBsResMain = uid();
+  mk(blocks, bBsResMain, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] });
+  setParent(blocks, bBsResMain, bCondEqMain);
+  mk(blocks, bCondEqMain, "operator_equals", {
+    OPERAND1: blockInputStr(bBsResMain),
+    OPERAND2: strLit(""),
+  }, {});
+  const bCond = uid(); // reuse name for compatibility with chain calls below
+  setParent(blocks, bCondEqMain, bCond);
+  mk(blocks, bCond, "operator_not", {
+    OPERAND: boolInput(bCondEqMain),
   }, {});
   setParent(blocks, bCond, bIfCI);
 
@@ -782,17 +829,15 @@ export function generateScratchProject(
     [renderFirst, renderLast] = buildStampCharBlocks(
       blocks,
       varI, varDisplayText, varCurX, varCurY,
-      varCharIndex, "__font_charIndex",
+      varBsResult,
       varLetterSpacing, "__font_letterSpacing",
-      listCharMap,
     );
   } else {
     [renderFirst, renderLast] = buildRenderCharBlocks(
       blocks,
       varI, varDisplayText, varCurX, varCurY,
-      varCharIndex, "__font_charIndex",
+      varBsResult,
       varLetterSpacing, "__font_letterSpacing",
-      listCharMap,
     );
   }
 
@@ -1096,7 +1141,11 @@ export function generateScratchProject(
 
   // ── Assemble variables for FontChar sprite ──
   const fontCharVariables: Record<string, [string, string | number]> = {
-    [varCharIndex]: ["__font_charIndex", 0],
+    [varBsResult]: ["__font_bsearch_result", ""],
+    [varBsLo]: ["__bsLo", 0],
+    [varBsHi]: ["__bsHi", 0],
+    [varBsMid]: ["__bsMid", 0],
+    [varBsMidChar]: ["__bsMidChar", ""],
     [varX]: ["__font_x", 0],
     [varY]: ["__font_y", 0],
     [varI]: ["__font_i", 0],
