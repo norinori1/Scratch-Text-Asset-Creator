@@ -37,7 +37,7 @@ export async function buildSb3(
     const result = await rasterizeGlyphToPng(font, char, options);
     if (!result) continue;
 
-    const { png, width, height, advanceWidth } = result;
+    const { png, height, advanceWidth } = result;
     const assetId = md5Hex(png);
     const filename = `${assetId}.png`;
 
