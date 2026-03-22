@@ -828,6 +828,31 @@ export function generateScratchProject(
   }, {});
   setParent(blocks, bIfBackslash, bRepeat);
 
+  // ── Warp helper block __font_doRender (always warp=true) ──
+  // Wrapping the rendering loop in a warp custom block ensures that all clone
+  // creation (or pen stamps) happen without screen refresh.  In clone mode this
+  // means every clone's "when I start as a clone" startup script is queued
+  // before any of them runs, so all characters become visible simultaneously
+  // in the same frame rather than appearing left-to-right one at a time.
+  const doRenderProcCode = "__font_doRender";
+  const doRenderProtoId = uid(), doRenderDefId = uid();
+  mk(blocks, doRenderProtoId, "procedures_prototype",
+    {}, {},
+    false, true, undefined,
+    {
+      tagName: "mutation",
+      children: [],
+      proccode: doRenderProcCode,
+      argumentids: JSON.stringify([]),
+      argumentnames: JSON.stringify([]),
+      argumentdefaults: JSON.stringify([]),
+      warp: "true",
+    });
+  setParent(blocks, doRenderProtoId, doRenderDefId);
+  mk(blocks, doRenderDefId, "procedures_definition",
+    { custom_block: [1, doRenderProtoId] }, {},
+    true, false, [400, -400]);
+
   // For pen mode, reset effects after the loop
   if (isPen) {
     const bResetSize = uid();
@@ -835,12 +860,23 @@ export function generateScratchProject(
     const bClearFX = uid();
     mk(blocks, bClearFX, "looks_cleargraphiceffects", {}, {});
     chain(blocks, [bRepeat, bResetSize, bClearFX]);
-    // Top-level render chain: includes dynamic alignment block between curY and setI
-    chain(blocks, [bRcvRender, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY, bAlignIf, bSetI, bRepeat]);
+    // Rendering blocks live under the warp helper definition
+    chain(blocks, [doRenderDefId, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY, bAlignIf, bSetI, bRepeat]);
   } else {
-    // Top-level render chain for clone mode
-    chain(blocks, [bRcvRender, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY, bAlignIf, bSetI, bRepeat]);
+    // Rendering blocks live under the warp helper definition
+    chain(blocks, [doRenderDefId, bSetSize, bSetColorEff, bSetBrightEff, bSetGhostEff, bSetCurX_initial, bSetCurY, bAlignIf, bSetI, bRepeat]);
   }
+
+  // __font_render broadcast handler: call the warp helper block
+  const bCallDoRenderFromBc = uid();
+  mk(blocks, bCallDoRenderFromBc, "procedures_call", {}, {}, false, false, undefined, {
+    tagName: "mutation",
+    children: [],
+    proccode: doRenderProcCode,
+    argumentids: JSON.stringify([]),
+    warp: "true",
+  });
+  chain(blocks, [bRcvRender, bCallDoRenderFromBc]);
 
   // ── Helper: generate "if arg = '' → use Font_Config[index]; else → use arg" block ──
   // Returns the id of the if-else block (top of this sub-chain)
@@ -1007,14 +1043,17 @@ export function generateScratchProject(
     clearBlockId = bBcClearNW;
   }
 
-  // 4. broadcast __font_render and wait
-  const bBcRender = uid(), bcRenderMenu = uid();
-  mk(blocks, bcRenderMenu, "event_broadcast_menu", {},
-    { BROADCAST_OPTION: ["__font_render", broadcastRender] }, false, true);
-  setParent(blocks, bcRenderMenu, bBcRender);
-  mk(blocks, bBcRender, "event_broadcastandwait", { BROADCAST_INPUT: [1, bcRenderMenu] }, {});
+  // 4. Call __font_doRender directly (warp=true → all characters appear simultaneously)
+  const bCallDoRender = uid();
+  mk(blocks, bCallDoRender, "procedures_call", {}, {}, false, false, undefined, {
+    tagName: "mutation",
+    children: [],
+    proccode: doRenderProcCode,
+    argumentids: JSON.stringify([]),
+    warp: "true",
+  });
 
-  chain(blocks, [defId, bSetDT, bSetX, bSetY, bSetSizeVar, bSetColorVar, bSetBrightVar, bSetGhostVar, bSetLayerVar, bSetAlignVar, bSetLSVar, clearBlockId, bBcRender]);
+  chain(blocks, [defId, bSetDT, bSetX, bSetY, bSetSizeVar, bSetColorVar, bSetBrightVar, bSetGhostVar, bSetLayerVar, bSetAlignVar, bSetLSVar, clearBlockId, bCallDoRender]);
 
   // ── Script 6: Custom block ── テキストをすべてクリアする ──
   // This is the warp clear block called directly by テキストを表示する (no broadcast overhead)
