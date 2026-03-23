@@ -52,6 +52,8 @@ export interface ExportOptions {
   align: TextAlign;
   /** Default letter spacing (pixels) – sets the initial value of __font_letterSpacing */
   letterSpacing: number;
+  /** テキスト入力モード (§15): param = 10引数, richtext = インラインタグ, console = コンソールスクリプト */
+  textInputMode?: TextInputMode;
 }
 
 export interface GlyphAsset {

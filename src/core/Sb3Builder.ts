@@ -13,6 +13,7 @@ export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   renderMode: "clone",
   align: "left",
   letterSpacing: 0,
+  textInputMode: "param",
 };
 
 export interface BuildProgress {

@@ -267,11 +267,12 @@ export function generateScratchProject(
   costumes: ScratchCostume[],
   glyphInfos: GlyphInfo[],
   backdropAssetId: string,
-  options: ExportOptions = { outputFormat: "svg", warp: true, renderMode: "clone", align: "left", letterSpacing: 0 },
+  options: ExportOptions = { outputFormat: "svg", warp: true, renderMode: "clone", align: "left", letterSpacing: 0, textInputMode: "param" },
   lineHeight = 72
 ): object {
   const isPen = options.renderMode === "pen";
   const warpStr = options.warp ? "true" : "false";
+  const textInputMode = options.textInputMode ?? "param";
 
   // IDs for Stage variables/broadcasts
   const varDisplayText = uid();
@@ -319,6 +320,13 @@ export function generateScratchProject(
   // Stage-level lists (for all sprites)
   const listFontConfig = uid();
   const listInstruction = uid();
+  // Mode 2 (richtext): tag-stripping variables (__pp_*)
+  const varPpBuf = uid(), varPpI = uid(), varPpInTag = uid(), varPpCh = uid();
+  // Mode 3 (console): console-script parsing variables (__con_*)
+  const varConI = uid(), varConLine = uid(), varConColPos = uid();
+  const varConJ = uid(), varConKey = uid(), varConVal = uid();
+  // Mode 3 list
+  const listConsole = uid();
 
   // Pre-populate __font_charMap: [char, advanceWidth, char, advanceWidth, ...]
   const charMapData: (string | number)[] = [];
@@ -967,7 +975,22 @@ export function generateScratchProject(
     return bIfElse;
   }
 
-  // ── Script 5: Custom block ── テキストを表示する ──
+  // Helper: set var directly from Font_Config[configIndex] (no arg fallback, used by Mode 2/3)
+  function buildFontConfigSet(varId: string, varName: string, configIndex: number, isStr = false): string {
+    const bItemCfg = uid();
+    mk(blocks, bItemCfg, "data_itemoflist", {
+      INDEX: numLit(configIndex),
+    }, { LIST: ["Font_Config", listFontConfig] });
+    const bSet = uid();
+    mk(blocks, bSet, "data_setvariableto", {
+      VALUE: isStr ? blockInputStr(bItemCfg) : blockInput(bItemCfg),
+    }, { VARIABLE: [varName, varId] });
+    setParent(blocks, bItemCfg, bSet);
+    return bSet;
+  }
+
+  // ── Script 5: Custom block ── テキストを表示する (Mode 1: param) ──
+  if (textInputMode === "param") {
   // Parameters: text %s, x %s, y %s, size %s, color %s, brightness %s, ghost %s, layer %s, align %s, letterSpacing %s
   // All non-text parameters use "" as default → Font_Config lookup inside the block body
   const procCode = "テキストを表示する %s x: %s y: %s サイズ: %s 色: %s 明るさ: %s 透明度: %s レイヤー: %s 揃え: %s 文字間隔: %s";
@@ -1088,6 +1111,643 @@ export function generateScratchProject(
   });
 
   chain(blocks, [defId, bSetDT, bSetX, bSetY, bSetSizeVar, bSetColorVar, bSetBrightVar, bSetGhostVar, bSetLayerVar, bSetAlignVar, bSetLSVar, clearBlockId, bCallDoRender]);
+  } // end if (textInputMode === "param")
+
+  // ── Script 5 (Mode 2): テキストを表示する (richText) x:(x) y:(y) ──
+  if (textInputMode === "richtext") {
+    const procCode2 = "テキストを表示する %s x: %s y: %s";
+    const rt2TextId = uid(), rt2XId = uid(), rt2YId = uid();
+    const rt2ProtoId = uid(), rt2DefId = uid();
+    const rt2TextShadow = uid(), rt2XShadow = uid(), rt2YShadow = uid();
+
+    mk(blocks, rt2TextShadow, "argument_reporter_string_number", {}, { VALUE: ["text", null] }, false, true);
+    setParent(blocks, rt2TextShadow, rt2ProtoId);
+    mk(blocks, rt2XShadow, "argument_reporter_string_number", {}, { VALUE: ["x", null] }, false, true);
+    setParent(blocks, rt2XShadow, rt2ProtoId);
+    mk(blocks, rt2YShadow, "argument_reporter_string_number", {}, { VALUE: ["y", null] }, false, true);
+    setParent(blocks, rt2YShadow, rt2ProtoId);
+
+    mk(blocks, rt2ProtoId, "procedures_prototype",
+      {
+        [rt2TextId]: [1, rt2TextShadow],
+        [rt2XId]: [1, rt2XShadow],
+        [rt2YId]: [1, rt2YShadow],
+      },
+      {},
+      false, true, undefined,
+      {
+        tagName: "mutation",
+        children: [],
+        proccode: procCode2,
+        argumentids: JSON.stringify([rt2TextId, rt2XId, rt2YId]),
+        argumentnames: JSON.stringify(["text", "x", "y"]),
+        argumentdefaults: JSON.stringify(["", "", ""]),
+        warp: warpStr,
+      });
+    setParent(blocks, rt2ProtoId, rt2DefId);
+    mk(blocks, rt2DefId, "procedures_definition", { custom_block: [1, rt2ProtoId] }, {}, true, false, [800, 0]);
+
+    // 1. set __font_displayText = arg text
+    const rt2SetDT = uid(), rt2ArgDT = uid();
+    mk(blocks, rt2ArgDT, "argument_reporter_string_number", {}, { VALUE: ["text", null] });
+    setParent(blocks, rt2ArgDT, rt2SetDT);
+    mk(blocks, rt2SetDT, "data_setvariableto",
+      { VALUE: blockInputStr(rt2ArgDT) },
+      { VARIABLE: ["__font_displayText", varDisplayText] });
+
+    // 2. x/y from arg (Font_Config fallback); size/color/etc. from Font_Config only
+    const rt2SetX = buildFontConfigLookup(varX, "__font_x", "x", 1);
+    const rt2SetY = buildFontConfigLookup(varY, "__font_y", "y", 2);
+    const rt2SetSize  = buildFontConfigSet(varSize,         "__font_size",          3);
+    const rt2SetColor = buildFontConfigSet(varColor,        "__font_color",         4);
+    const rt2SetBright = buildFontConfigSet(varBrightness,  "__font_brightness",    5);
+    const rt2SetGhost  = buildFontConfigSet(varGhost,       "__font_ghost",         6);
+    const rt2SetLayer  = buildFontConfigSet(varLayer,       "__font_layer",         7);
+    const rt2SetAlign  = buildFontConfigSet(varAlign,       "__font_align",         8, true);
+    const rt2SetLS     = buildFontConfigSet(varLetterSpacing, "__font_letterSpacing", 9);
+
+    // 3. Call __font_stripTags (strips <tag>...</tag> from __font_displayText)
+    const rt2CallStrip = uid();
+    mk(blocks, rt2CallStrip, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: "__font_stripTags",
+      argumentids: JSON.stringify([]),
+      warp: "true",
+    });
+
+    // 4. Clear + render
+    let rt2ClearId: string;
+    if (isPen) {
+      const bCallClear2 = uid();
+      mk(blocks, bCallClear2, "procedures_call", {}, {}, false, false, undefined, {
+        tagName: "mutation",
+        children: [],
+        proccode: "テキストをすべてクリアする",
+        argumentids: JSON.stringify([]),
+        warp: warpStr,
+      });
+      rt2ClearId = bCallClear2;
+    } else {
+      const bBcClearNW2 = uid(), bcClearNWMenu2 = uid();
+      mk(blocks, bcClearNWMenu2, "event_broadcast_menu", {},
+        { BROADCAST_OPTION: ["__font_clear", broadcastClear] }, false, true);
+      setParent(blocks, bcClearNWMenu2, bBcClearNW2);
+      mk(blocks, bBcClearNW2, "event_broadcast", { BROADCAST_INPUT: [1, bcClearNWMenu2] }, {});
+      rt2ClearId = bBcClearNW2;
+    }
+
+    const rt2CallRender = uid();
+    mk(blocks, rt2CallRender, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: doRenderProcCode,
+      argumentids: JSON.stringify([]),
+      warp: "true",
+    });
+
+    chain(blocks, [rt2DefId, rt2SetDT, rt2SetX, rt2SetY, rt2SetSize, rt2SetColor, rt2SetBright, rt2SetGhost, rt2SetLayer, rt2SetAlign, rt2SetLS, rt2CallStrip, rt2ClearId, rt2CallRender]);
+
+    // ── __font_stripTags helper (warp=true) ──
+    // Strips <tag> markup from __font_displayText; uses __pp_* variables
+    const stripProtoId = uid(), stripDefId = uid();
+    mk(blocks, stripProtoId, "procedures_prototype",
+      {}, {},
+      false, true, undefined,
+      {
+        tagName: "mutation",
+        children: [],
+        proccode: "__font_stripTags",
+        argumentids: JSON.stringify([]),
+        argumentnames: JSON.stringify([]),
+        argumentdefaults: JSON.stringify([]),
+        warp: "true",
+      });
+    setParent(blocks, stripProtoId, stripDefId);
+    mk(blocks, stripDefId, "procedures_definition", { custom_block: [1, stripProtoId] }, {}, true, false, [800, 600]);
+
+    // set __pp_buf = ""
+    const sBufInit = uid();
+    mk(blocks, sBufInit, "data_setvariableto", { VALUE: strLit("") }, { VARIABLE: ["__pp_buf", varPpBuf] });
+    // set __pp_i = 1
+    const sIInit = uid();
+    mk(blocks, sIInit, "data_setvariableto", { VALUE: numLit(1) }, { VARIABLE: ["__pp_i", varPpI] });
+    // set __pp_inTag = 0
+    const sInTagInit = uid();
+    mk(blocks, sInTagInit, "data_setvariableto", { VALUE: numLit(0) }, { VARIABLE: ["__pp_inTag", varPpInTag] });
+
+    // repeat (length of __font_displayText)
+    const sRepeatId = uid();
+    const sLenDTStrip = uid(), sLenDTVarStrip = uid();
+    mk(blocks, sLenDTVarStrip, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
+    setParent(blocks, sLenDTVarStrip, sLenDTStrip);
+    mk(blocks, sLenDTStrip, "operator_length", { STRING: blockInputStr(sLenDTVarStrip) }, {});
+    setParent(blocks, sLenDTStrip, sRepeatId);
+
+    // set __pp_ch = letter(__pp_i) of __font_displayText
+    const sSetCh = uid();
+    const sLetterI = mkLetterOf(blocks, varPpI, "__pp_i", varDisplayText, "__font_displayText");
+    setParent(blocks, sLetterI, sSetCh);
+    mk(blocks, sSetCh, "data_setvariableto", { VALUE: blockInputStr(sLetterI) }, { VARIABLE: ["__pp_ch", varPpCh] });
+    setParent(blocks, sSetCh, sRepeatId);
+
+    // if __pp_ch = "<": set __pp_inTag = 1
+    const sChVarLt = uid(), sChEqLt = uid();
+    mk(blocks, sChVarLt, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] });
+    setParent(blocks, sChVarLt, sChEqLt);
+    mk(blocks, sChEqLt, "operator_equals", { OPERAND1: blockInputStr(sChVarLt), OPERAND2: strLit("<") }, {});
+    const sSetInTag1 = uid();
+    mk(blocks, sSetInTag1, "data_setvariableto", { VALUE: numLit(1) }, { VARIABLE: ["__pp_inTag", varPpInTag] });
+    const sIfLt = uid();
+    setParent(blocks, sChEqLt, sIfLt);
+    setParent(blocks, sSetInTag1, sIfLt);
+    mk(blocks, sIfLt, "control_if", { CONDITION: boolInput(sChEqLt), SUBSTACK: substackInput(sSetInTag1) }, {});
+
+    // if __pp_ch = ">": set __pp_inTag = 0
+    const sChVarGt = uid(), sChEqGt = uid();
+    mk(blocks, sChVarGt, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] });
+    setParent(blocks, sChVarGt, sChEqGt);
+    mk(blocks, sChEqGt, "operator_equals", { OPERAND1: blockInputStr(sChVarGt), OPERAND2: strLit(">") }, {});
+    const sSetInTag0 = uid();
+    mk(blocks, sSetInTag0, "data_setvariableto", { VALUE: numLit(0) }, { VARIABLE: ["__pp_inTag", varPpInTag] });
+    const sIfGt = uid();
+    setParent(blocks, sChEqGt, sIfGt);
+    setParent(blocks, sSetInTag0, sIfGt);
+    mk(blocks, sIfGt, "control_if", { CONDITION: boolInput(sChEqGt), SUBSTACK: substackInput(sSetInTag0) }, {});
+
+    // if NOT (__pp_inTag = 1) AND NOT (__pp_ch = "<") AND NOT (__pp_ch = ">"): buf = join(buf, ch)
+    const sInTagV = uid(), sInTagEq1 = uid(), sNotInTag = uid();
+    mk(blocks, sInTagV, "data_variable", {}, { VARIABLE: ["__pp_inTag", varPpInTag] });
+    setParent(blocks, sInTagV, sInTagEq1);
+    mk(blocks, sInTagEq1, "operator_equals", { OPERAND1: blockInput(sInTagV), OPERAND2: numLit(1) }, {});
+    setParent(blocks, sInTagEq1, sNotInTag);
+    mk(blocks, sNotInTag, "operator_not", { OPERAND: boolInput(sInTagEq1) }, {});
+
+    const sChVarLt2 = uid(), sChEqLt2 = uid(), sNotLt = uid();
+    mk(blocks, sChVarLt2, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] });
+    setParent(blocks, sChVarLt2, sChEqLt2);
+    mk(blocks, sChEqLt2, "operator_equals", { OPERAND1: blockInputStr(sChVarLt2), OPERAND2: strLit("<") }, {});
+    setParent(blocks, sChEqLt2, sNotLt);
+    mk(blocks, sNotLt, "operator_not", { OPERAND: boolInput(sChEqLt2) }, {});
+
+    const sChVarGt2 = uid(), sChEqGt2 = uid(), sNotGt = uid();
+    mk(blocks, sChVarGt2, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] });
+    setParent(blocks, sChVarGt2, sChEqGt2);
+    mk(blocks, sChEqGt2, "operator_equals", { OPERAND1: blockInputStr(sChVarGt2), OPERAND2: strLit(">") }, {});
+    setParent(blocks, sChEqGt2, sNotGt);
+    mk(blocks, sNotGt, "operator_not", { OPERAND: boolInput(sChEqGt2) }, {});
+
+    const sAndAB = uid();
+    setParent(blocks, sNotInTag, sAndAB);
+    setParent(blocks, sNotLt, sAndAB);
+    mk(blocks, sAndAB, "operator_and", { OPERAND1: boolInput(sNotInTag), OPERAND2: boolInput(sNotLt) }, {});
+    const sAndABC = uid();
+    setParent(blocks, sAndAB, sAndABC);
+    setParent(blocks, sNotGt, sAndABC);
+    mk(blocks, sAndABC, "operator_and", { OPERAND1: boolInput(sAndAB), OPERAND2: boolInput(sNotGt) }, {});
+
+    const sBufVar = uid(), sChVarJ = uid(), sJoin = uid(), sSetBuf = uid();
+    mk(blocks, sBufVar, "data_variable", {}, { VARIABLE: ["__pp_buf", varPpBuf] });
+    mk(blocks, sChVarJ, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] });
+    setParent(blocks, sBufVar, sJoin);
+    setParent(blocks, sChVarJ, sJoin);
+    mk(blocks, sJoin, "operator_join", { STRING1: blockInputStr(sBufVar), STRING2: blockInputStr(sChVarJ) }, {});
+    setParent(blocks, sJoin, sSetBuf);
+    mk(blocks, sSetBuf, "data_setvariableto", { VALUE: blockInputStr(sJoin) }, { VARIABLE: ["__pp_buf", varPpBuf] });
+    const sIfAppend = uid();
+    setParent(blocks, sAndABC, sIfAppend);
+    setParent(blocks, sSetBuf, sIfAppend);
+    mk(blocks, sIfAppend, "control_if", { CONDITION: boolInput(sAndABC), SUBSTACK: substackInput(sSetBuf) }, {});
+
+    // change __pp_i by 1
+    const sChangeI = uid();
+    mk(blocks, sChangeI, "data_changevariableby", { VALUE: numLit(1) }, { VARIABLE: ["__pp_i", varPpI] });
+
+    chain(blocks, [sSetCh, sIfLt, sIfGt, sIfAppend, sChangeI]);
+    mk(blocks, sRepeatId, "control_repeat", {
+      TIMES: blockInput(sLenDTStrip, 10),
+      SUBSTACK: substackInput(sSetCh),
+    }, {});
+
+    // set __font_displayText = __pp_buf
+    const sBufVarFinal = uid(), sSetDTFinal = uid();
+    mk(blocks, sBufVarFinal, "data_variable", {}, { VARIABLE: ["__pp_buf", varPpBuf] });
+    setParent(blocks, sBufVarFinal, sSetDTFinal);
+    mk(blocks, sSetDTFinal, "data_setvariableto", { VALUE: blockInputStr(sBufVarFinal) }, { VARIABLE: ["__font_displayText", varDisplayText] });
+
+    chain(blocks, [stripDefId, sBufInit, sIInit, sInTagInit, sRepeatId, sSetDTFinal]);
+  } // end if (textInputMode === "richtext")
+
+  // ── Script 5 (Mode 3): __font_console_run ──
+  if (textInputMode === "console") {
+    const conProcCode = "__font_console_run";
+    const conProtoId = uid(), conDefId = uid();
+    mk(blocks, conProtoId, "procedures_prototype",
+      {}, {},
+      false, true, undefined,
+      {
+        tagName: "mutation",
+        children: [],
+        proccode: conProcCode,
+        argumentids: JSON.stringify([]),
+        argumentnames: JSON.stringify([]),
+        argumentdefaults: JSON.stringify([]),
+        warp: warpStr,
+      });
+    setParent(blocks, conProtoId, conDefId);
+    mk(blocks, conDefId, "procedures_definition", { custom_block: [1, conProtoId] }, {}, true, false, [800, 0]);
+
+    // 1. Clear screen once at start
+    let conClearId: string;
+    if (isPen) {
+      const bConClearPen = uid();
+      mk(blocks, bConClearPen, "procedures_call", {}, {}, false, false, undefined, {
+        tagName: "mutation",
+        children: [],
+        proccode: "テキストをすべてクリアする",
+        argumentids: JSON.stringify([]),
+        warp: warpStr,
+      });
+      conClearId = bConClearPen;
+    } else {
+      const bConClearBc = uid(), conClearMenu = uid();
+      mk(blocks, conClearMenu, "event_broadcast_menu", {},
+        { BROADCAST_OPTION: ["__font_clear", broadcastClear] }, false, true);
+      setParent(blocks, conClearMenu, bConClearBc);
+      mk(blocks, bConClearBc, "event_broadcast", { BROADCAST_INPUT: [1, conClearMenu] }, {});
+      conClearId = bConClearBc;
+    }
+
+    // 2. Initialize style vars from Font_Config defaults
+    const conInitSize  = buildFontConfigSet(varSize,         "__font_size",          3);
+    const conInitColor = buildFontConfigSet(varColor,        "__font_color",         4);
+    const conInitBright = buildFontConfigSet(varBrightness,  "__font_brightness",    5);
+    const conInitGhost  = buildFontConfigSet(varGhost,       "__font_ghost",         6);
+    const conInitLayer  = buildFontConfigSet(varLayer,       "__font_layer",         7);
+    const conInitAlign  = buildFontConfigSet(varAlign,       "__font_align",         8, true);
+    const conInitLS     = buildFontConfigSet(varLetterSpacing, "__font_letterSpacing", 9);
+    const conInitX      = buildFontConfigSet(varX,           "__font_x",             1);
+    const conInitY      = buildFontConfigSet(varY,           "__font_y",             2);
+    const conInitDT = uid();
+    mk(blocks, conInitDT, "data_setvariableto", { VALUE: strLit("") },
+      { VARIABLE: ["__font_displayText", varDisplayText] });
+
+    // 3. set __con_i = 1
+    const conSetI = uid();
+    mk(blocks, conSetI, "data_setvariableto", { VALUE: numLit(1) }, { VARIABLE: ["__con_i", varConI] });
+
+    // ── outer repeat (length of [文字表示コンソール]) ──
+    const conOuterRepeat = uid();
+    const conLenList = uid();
+    mk(blocks, conLenList, "data_lengthoflist", {}, { LIST: ["文字表示コンソール", listConsole] });
+    setParent(blocks, conLenList, conOuterRepeat);
+
+    // set __con_line = item(__con_i) of [文字表示コンソール]
+    const conConIVar = uid(), conItemLine = uid(), conSetLine = uid();
+    mk(blocks, conConIVar, "data_variable", {}, { VARIABLE: ["__con_i", varConI] });
+    setParent(blocks, conConIVar, conItemLine);
+    mk(blocks, conItemLine, "data_itemoflist", { INDEX: blockInput(conConIVar) }, { LIST: ["文字表示コンソール", listConsole] });
+    setParent(blocks, conItemLine, conSetLine);
+    mk(blocks, conSetLine, "data_setvariableto", { VALUE: blockInputStr(conItemLine) },
+      { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conSetLine, conOuterRepeat);
+
+    // skip check: NOT ((length=0) OR (letter1="/"))
+    const conLineVar0 = uid(), conLenLine = uid(), conLenEqZero = uid();
+    mk(blocks, conLineVar0, "data_variable", {}, { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conLineVar0, conLenLine);
+    mk(blocks, conLenLine, "operator_length", { STRING: blockInputStr(conLineVar0) }, {});
+    setParent(blocks, conLenLine, conLenEqZero);
+    mk(blocks, conLenEqZero, "operator_equals", { OPERAND1: blockInput(conLenLine), OPERAND2: numLit(0) }, {});
+
+    const conLineVar1 = uid(), conLetter1 = uid(), conLetter1EqSlash = uid();
+    mk(blocks, conLineVar1, "data_variable", {}, { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conLineVar1, conLetter1);
+    mk(blocks, conLetter1, "operator_letter_of", { LETTER: numLit(1), STRING: blockInputStr(conLineVar1) }, {});
+    setParent(blocks, conLetter1, conLetter1EqSlash);
+    mk(blocks, conLetter1EqSlash, "operator_equals",
+      { OPERAND1: blockInputStr(conLetter1), OPERAND2: strLit("/") }, {});
+
+    const conOrSkip = uid();
+    setParent(blocks, conLenEqZero, conOrSkip);
+    setParent(blocks, conLetter1EqSlash, conOrSkip);
+    mk(blocks, conOrSkip, "operator_or",
+      { OPERAND1: boolInput(conLenEqZero), OPERAND2: boolInput(conLetter1EqSlash) }, {});
+    const conNotSkip = uid();
+    setParent(blocks, conOrSkip, conNotSkip);
+    mk(blocks, conNotSkip, "operator_not", { OPERAND: boolInput(conOrSkip) }, {});
+
+    // separator check: __con_line = "---"
+    const conLineVarSep = uid(), conLineEqSep = uid();
+    mk(blocks, conLineVarSep, "data_variable", {}, { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conLineVarSep, conLineEqSep);
+    mk(blocks, conLineEqSep, "operator_equals",
+      { OPERAND1: blockInputStr(conLineVarSep), OPERAND2: strLit("---") }, {});
+
+    // flush if displayText != "" (called on ---)
+    const conDTVarEmp = uid(), conDTEqEmp = uid(), conNotDTEmp = uid();
+    mk(blocks, conDTVarEmp, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
+    setParent(blocks, conDTVarEmp, conDTEqEmp);
+    mk(blocks, conDTEqEmp, "operator_equals",
+      { OPERAND1: blockInputStr(conDTVarEmp), OPERAND2: strLit("") }, {});
+    setParent(blocks, conDTEqEmp, conNotDTEmp);
+    mk(blocks, conNotDTEmp, "operator_not", { OPERAND: boolInput(conDTEqEmp) }, {});
+
+    // call doRender (inside flush)
+    const conCallRenderFlush = uid();
+    mk(blocks, conCallRenderFlush, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: doRenderProcCode,
+      argumentids: JSON.stringify([]),
+      warp: "true",
+    });
+
+    // reset displayText + state vars after flush
+    const conResetDT = uid();
+    mk(blocks, conResetDT, "data_setvariableto", { VALUE: strLit("") },
+      { VARIABLE: ["__font_displayText", varDisplayText] });
+    const conResetSize  = buildFontConfigSet(varSize,          "__font_size",           3);
+    const conResetColor = buildFontConfigSet(varColor,         "__font_color",          4);
+    const conResetBright = buildFontConfigSet(varBrightness,   "__font_brightness",     5);
+    const conResetGhost  = buildFontConfigSet(varGhost,        "__font_ghost",          6);
+    const conResetLayer  = buildFontConfigSet(varLayer,        "__font_layer",          7);
+    const conResetAlign  = buildFontConfigSet(varAlign,        "__font_align",          8, true);
+    const conResetLS     = buildFontConfigSet(varLetterSpacing, "__font_letterSpacing", 9);
+    const conResetX      = buildFontConfigSet(varX,            "__font_x",              1);
+    const conResetY      = buildFontConfigSet(varY,            "__font_y",              2);
+    chain(blocks, [conCallRenderFlush, conResetDT, conResetSize, conResetColor, conResetBright,
+      conResetGhost, conResetLayer, conResetAlign, conResetLS, conResetX, conResetY]);
+
+    const conIfHasDT = uid();
+    setParent(blocks, conNotDTEmp, conIfHasDT);
+    setParent(blocks, conCallRenderFlush, conIfHasDT);
+    mk(blocks, conIfHasDT, "control_if",
+      { CONDITION: boolInput(conNotDTEmp), SUBSTACK: substackInput(conCallRenderFlush) }, {});
+
+    // ── key:value parse branch (else branch of --- check) ──
+    // Find colon position
+    const conFindRepeat = uid();
+    const conSetColPos0 = uid();
+    mk(blocks, conSetColPos0, "data_setvariableto", { VALUE: numLit(0) },
+      { VARIABLE: ["__con_colPos", varConColPos] });
+    const conSetJ1Find = uid();
+    mk(blocks, conSetJ1Find, "data_setvariableto", { VALUE: numLit(1) },
+      { VARIABLE: ["__con_j", varConJ] });
+
+    const conLineVarFind = uid(), conLenLineFind = uid();
+    mk(blocks, conLineVarFind, "data_variable", {}, { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conLineVarFind, conLenLineFind);
+    mk(blocks, conLenLineFind, "operator_length", { STRING: blockInputStr(conLineVarFind) }, {});
+    setParent(blocks, conLenLineFind, conFindRepeat);
+
+    const conFindJVar = uid(), conFindLineVar = uid(), conFindLetter = uid();
+    mk(blocks, conFindJVar, "data_variable", {}, { VARIABLE: ["__con_j", varConJ] });
+    mk(blocks, conFindLineVar, "data_variable", {}, { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conFindJVar, conFindLetter);
+    setParent(blocks, conFindLineVar, conFindLetter);
+    mk(blocks, conFindLetter, "operator_letter_of",
+      { LETTER: blockInput(conFindJVar, 1), STRING: blockInputStr(conFindLineVar) }, {});
+    const conFindEqColon = uid();
+    setParent(blocks, conFindLetter, conFindEqColon);
+    mk(blocks, conFindEqColon, "operator_equals",
+      { OPERAND1: blockInputStr(conFindLetter), OPERAND2: strLit(":") }, {});
+
+    const conColPosVarZ = uid(), conColPosEqZ = uid();
+    mk(blocks, conColPosVarZ, "data_variable", {}, { VARIABLE: ["__con_colPos", varConColPos] });
+    setParent(blocks, conColPosVarZ, conColPosEqZ);
+    mk(blocks, conColPosEqZ, "operator_equals",
+      { OPERAND1: blockInput(conColPosVarZ), OPERAND2: numLit(0) }, {});
+
+    const conFindAnd = uid();
+    setParent(blocks, conFindEqColon, conFindAnd);
+    setParent(blocks, conColPosEqZ, conFindAnd);
+    mk(blocks, conFindAnd, "operator_and",
+      { OPERAND1: boolInput(conFindEqColon), OPERAND2: boolInput(conColPosEqZ) }, {});
+
+    const conFindSetColPos = uid(), conFindJVarSet = uid();
+    mk(blocks, conFindJVarSet, "data_variable", {}, { VARIABLE: ["__con_j", varConJ] });
+    setParent(blocks, conFindJVarSet, conFindSetColPos);
+    mk(blocks, conFindSetColPos, "data_setvariableto", { VALUE: blockInput(conFindJVarSet) },
+      { VARIABLE: ["__con_colPos", varConColPos] });
+    const conFindIf = uid();
+    setParent(blocks, conFindAnd, conFindIf);
+    setParent(blocks, conFindSetColPos, conFindIf);
+    mk(blocks, conFindIf, "control_if",
+      { CONDITION: boolInput(conFindAnd), SUBSTACK: substackInput(conFindSetColPos) }, {});
+
+    const conFindChangeJ = uid();
+    mk(blocks, conFindChangeJ, "data_changevariableby", { VALUE: numLit(1) },
+      { VARIABLE: ["__con_j", varConJ] });
+    chain(blocks, [conFindIf, conFindChangeJ]);
+    setParent(blocks, conFindIf, conFindRepeat);
+    mk(blocks, conFindRepeat, "control_repeat", {
+      TIMES: blockInput(conLenLineFind, 10),
+      SUBSTACK: substackInput(conFindIf),
+    }, {});
+
+    // Extract key (chars 1..colPos-1)
+    const conSetKey0 = uid();
+    mk(blocks, conSetKey0, "data_setvariableto", { VALUE: strLit("") },
+      { VARIABLE: ["__con_key", varConKey] });
+    const conSetJKey = uid();
+    mk(blocks, conSetJKey, "data_setvariableto", { VALUE: numLit(1) },
+      { VARIABLE: ["__con_j", varConJ] });
+
+    const conKeyRepeat = uid();
+    const conColPosVarKey = uid(), conColPosMinus1 = uid();
+    mk(blocks, conColPosVarKey, "data_variable", {}, { VARIABLE: ["__con_colPos", varConColPos] });
+    setParent(blocks, conColPosVarKey, conColPosMinus1);
+    mk(blocks, conColPosMinus1, "operator_subtract",
+      { NUM1: blockInput(conColPosVarKey), NUM2: numLit(1) }, {});
+    setParent(blocks, conColPosMinus1, conKeyRepeat);
+
+    const conKeyJVar = uid(), conKeyLineVar = uid(), conKeyLetter = uid();
+    mk(blocks, conKeyJVar, "data_variable", {}, { VARIABLE: ["__con_j", varConJ] });
+    mk(blocks, conKeyLineVar, "data_variable", {}, { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conKeyJVar, conKeyLetter);
+    setParent(blocks, conKeyLineVar, conKeyLetter);
+    mk(blocks, conKeyLetter, "operator_letter_of",
+      { LETTER: blockInput(conKeyJVar, 1), STRING: blockInputStr(conKeyLineVar) }, {});
+    const conKeyVar = uid(), conKeyJoin = uid(), conSetKey = uid();
+    mk(blocks, conKeyVar, "data_variable", {}, { VARIABLE: ["__con_key", varConKey] });
+    setParent(blocks, conKeyVar, conKeyJoin);
+    setParent(blocks, conKeyLetter, conKeyJoin);
+    mk(blocks, conKeyJoin, "operator_join",
+      { STRING1: blockInputStr(conKeyVar), STRING2: blockInputStr(conKeyLetter) }, {});
+    setParent(blocks, conKeyJoin, conSetKey);
+    mk(blocks, conSetKey, "data_setvariableto", { VALUE: blockInputStr(conKeyJoin) },
+      { VARIABLE: ["__con_key", varConKey] });
+    const conKeyChangeJ = uid();
+    mk(blocks, conKeyChangeJ, "data_changevariableby", { VALUE: numLit(1) },
+      { VARIABLE: ["__con_j", varConJ] });
+    chain(blocks, [conSetKey, conKeyChangeJ]);
+    setParent(blocks, conSetKey, conKeyRepeat);
+    mk(blocks, conKeyRepeat, "control_repeat", {
+      TIMES: blockInput(conColPosMinus1, 0),
+      SUBSTACK: substackInput(conSetKey),
+    }, {});
+
+    // Extract value (chars colPos+1..end)
+    const conSetVal0 = uid();
+    mk(blocks, conSetVal0, "data_setvariableto", { VALUE: strLit("") },
+      { VARIABLE: ["__con_val", varConVal] });
+    const conColPosVarPlus = uid(), conColPosPlusOne = uid(), conSetJVal = uid();
+    mk(blocks, conColPosVarPlus, "data_variable", {}, { VARIABLE: ["__con_colPos", varConColPos] });
+    setParent(blocks, conColPosVarPlus, conColPosPlusOne);
+    mk(blocks, conColPosPlusOne, "operator_add",
+      { NUM1: blockInput(conColPosVarPlus), NUM2: numLit(1) }, {});
+    setParent(blocks, conColPosPlusOne, conSetJVal);
+    mk(blocks, conSetJVal, "data_setvariableto", { VALUE: blockInput(conColPosPlusOne) },
+      { VARIABLE: ["__con_j", varConJ] });
+
+    const conValRepeat = uid();
+    const conLineVarVal = uid(), conLenLineVal = uid();
+    mk(blocks, conLineVarVal, "data_variable", {}, { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conLineVarVal, conLenLineVal);
+    mk(blocks, conLenLineVal, "operator_length", { STRING: blockInputStr(conLineVarVal) }, {});
+    const conColPosVarMinus = uid(), conLenMinusCol = uid();
+    mk(blocks, conColPosVarMinus, "data_variable", {}, { VARIABLE: ["__con_colPos", varConColPos] });
+    setParent(blocks, conLenLineVal, conLenMinusCol);
+    setParent(blocks, conColPosVarMinus, conLenMinusCol);
+    mk(blocks, conLenMinusCol, "operator_subtract",
+      { NUM1: blockInput(conLenLineVal), NUM2: blockInput(conColPosVarMinus) }, {});
+    setParent(blocks, conLenMinusCol, conValRepeat);
+
+    const conValJVar = uid(), conValLineVar = uid(), conValLetter = uid();
+    mk(blocks, conValJVar, "data_variable", {}, { VARIABLE: ["__con_j", varConJ] });
+    mk(blocks, conValLineVar, "data_variable", {}, { VARIABLE: ["__con_line", varConLine] });
+    setParent(blocks, conValJVar, conValLetter);
+    setParent(blocks, conValLineVar, conValLetter);
+    mk(blocks, conValLetter, "operator_letter_of",
+      { LETTER: blockInput(conValJVar, 1), STRING: blockInputStr(conValLineVar) }, {});
+    const conValVar = uid(), conValJoin = uid(), conSetVal = uid();
+    mk(blocks, conValVar, "data_variable", {}, { VARIABLE: ["__con_val", varConVal] });
+    setParent(blocks, conValVar, conValJoin);
+    setParent(blocks, conValLetter, conValJoin);
+    mk(blocks, conValJoin, "operator_join",
+      { STRING1: blockInputStr(conValVar), STRING2: blockInputStr(conValLetter) }, {});
+    setParent(blocks, conValJoin, conSetVal);
+    mk(blocks, conSetVal, "data_setvariableto", { VALUE: blockInputStr(conValJoin) },
+      { VARIABLE: ["__con_val", varConVal] });
+    const conValChangeJ = uid();
+    mk(blocks, conValChangeJ, "data_changevariableby", { VALUE: numLit(1) },
+      { VARIABLE: ["__con_j", varConJ] });
+    chain(blocks, [conSetVal, conValChangeJ]);
+    setParent(blocks, conSetVal, conValRepeat);
+    mk(blocks, conValRepeat, "control_repeat", {
+      TIMES: blockInput(conLenMinusCol, 0),
+      SUBSTACK: substackInput(conSetVal),
+    }, {});
+
+    // Key dispatch: if __con_key = "X" → set __font_X = __con_val
+    function buildKeyDispatch(tVarId: string, tVarName: string, keyStr: string, isStr = false): string {
+      const kKeyVar = uid(), kKeyEq = uid();
+      mk(blocks, kKeyVar, "data_variable", {}, { VARIABLE: ["__con_key", varConKey] });
+      setParent(blocks, kKeyVar, kKeyEq);
+      mk(blocks, kKeyEq, "operator_equals",
+        { OPERAND1: blockInputStr(kKeyVar), OPERAND2: strLit(keyStr) }, {});
+      const kValVar = uid(), kValSet = uid();
+      mk(blocks, kValVar, "data_variable", {}, { VARIABLE: ["__con_val", varConVal] });
+      setParent(blocks, kValVar, kValSet);
+      mk(blocks, kValSet, "data_setvariableto", {
+        VALUE: isStr ? blockInputStr(kValVar) : blockInput(kValVar),
+      }, { VARIABLE: [tVarName, tVarId] });
+      const kIf = uid();
+      setParent(blocks, kKeyEq, kIf);
+      setParent(blocks, kValSet, kIf);
+      mk(blocks, kIf, "control_if",
+        { CONDITION: boolInput(kKeyEq), SUBSTACK: substackInput(kValSet) }, {});
+      return kIf;
+    }
+
+    const dText   = buildKeyDispatch(varDisplayText,    "__font_displayText",   "text",          true);
+    const dX      = buildKeyDispatch(varX,              "__font_x",             "x");
+    const dY      = buildKeyDispatch(varY,              "__font_y",             "y");
+    const dSize   = buildKeyDispatch(varSize,           "__font_size",          "size");
+    const dColor  = buildKeyDispatch(varColor,          "__font_color",         "color");
+    const dGhost  = buildKeyDispatch(varGhost,          "__font_ghost",         "ghost");
+    const dBright = buildKeyDispatch(varBrightness,     "__font_brightness",    "brightness");
+    const dAlign  = buildKeyDispatch(varAlign,          "__font_align",         "align",         true);
+    const dLS     = buildKeyDispatch(varLetterSpacing,  "__font_letterSpacing", "letterSpacing");
+    const dLayer  = buildKeyDispatch(varLayer,          "__font_layer",         "layer");
+    chain(blocks, [dText, dX, dY, dSize, dColor, dGhost, dBright, dAlign, dLS, dLayer]);
+
+    // if colPos != 0: run key/val extraction + dispatch
+    const conColPosVarNZ = uid(), conColPosEqNZ = uid(), conNotColEqZ = uid();
+    mk(blocks, conColPosVarNZ, "data_variable", {}, { VARIABLE: ["__con_colPos", varConColPos] });
+    setParent(blocks, conColPosVarNZ, conColPosEqNZ);
+    mk(blocks, conColPosEqNZ, "operator_equals",
+      { OPERAND1: blockInput(conColPosVarNZ), OPERAND2: numLit(0) }, {});
+    setParent(blocks, conColPosEqNZ, conNotColEqZ);
+    mk(blocks, conNotColEqZ, "operator_not", { OPERAND: boolInput(conColPosEqNZ) }, {});
+
+    // chain: setKey0 → setJKey → keyRepeat → setVal0 → setJVal → valRepeat → dispatch
+    chain(blocks, [conSetKey0, conSetJKey, conKeyRepeat, conSetVal0, conSetJVal, conValRepeat, dText]);
+
+    const conIfColFound = uid();
+    setParent(blocks, conNotColEqZ, conIfColFound);
+    setParent(blocks, conSetKey0, conIfColFound);
+    mk(blocks, conIfColFound, "control_if",
+      { CONDITION: boolInput(conNotColEqZ), SUBSTACK: substackInput(conSetKey0) }, {});
+
+    // parse branch: setColPos0 → setJ1 → findRepeat → ifColFound
+    chain(blocks, [conSetColPos0, conSetJ1Find, conFindRepeat, conIfColFound]);
+
+    // if/else: line = "---" ? flush : parse
+    const conIfSep = uid();
+    setParent(blocks, conLineEqSep, conIfSep);
+    setParent(blocks, conIfHasDT, conIfSep);
+    setParent(blocks, conSetColPos0, conIfSep);
+    mk(blocks, conIfSep, "control_if_else", {
+      CONDITION: boolInput(conLineEqSep),
+      SUBSTACK: substackInput(conIfHasDT),
+      SUBSTACK2: substackInput(conSetColPos0),
+    }, {});
+
+    // outer if NOT skip
+    const conChangeConI = uid();
+    mk(blocks, conChangeConI, "data_changevariableby", { VALUE: numLit(1) },
+      { VARIABLE: ["__con_i", varConI] });
+    const conIfNotSkip = uid();
+    setParent(blocks, conNotSkip, conIfNotSkip);
+    setParent(blocks, conIfSep, conIfNotSkip);
+    mk(blocks, conIfNotSkip, "control_if",
+      { CONDITION: boolInput(conNotSkip), SUBSTACK: substackInput(conIfSep) }, {});
+
+    // body: setLine → ifNotSkip → changeConI
+    chain(blocks, [conSetLine, conIfNotSkip, conChangeConI]);
+    mk(blocks, conOuterRepeat, "control_repeat", {
+      TIMES: blockInput(conLenList, 0),
+      SUBSTACK: substackInput(conSetLine),
+    }, {});
+
+    // Final flush
+    const conFinalDTVar = uid(), conFinalDTEq = uid(), conFinalNotEq = uid();
+    mk(blocks, conFinalDTVar, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
+    setParent(blocks, conFinalDTVar, conFinalDTEq);
+    mk(blocks, conFinalDTEq, "operator_equals",
+      { OPERAND1: blockInputStr(conFinalDTVar), OPERAND2: strLit("") }, {});
+    setParent(blocks, conFinalDTEq, conFinalNotEq);
+    mk(blocks, conFinalNotEq, "operator_not", { OPERAND: boolInput(conFinalDTEq) }, {});
+    const conFinalRender = uid();
+    mk(blocks, conFinalRender, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: doRenderProcCode,
+      argumentids: JSON.stringify([]),
+      warp: "true",
+    });
+    const conFinalIf = uid();
+    setParent(blocks, conFinalNotEq, conFinalIf);
+    setParent(blocks, conFinalRender, conFinalIf);
+    mk(blocks, conFinalIf, "control_if",
+      { CONDITION: boolInput(conFinalNotEq), SUBSTACK: substackInput(conFinalRender) }, {});
+
+    chain(blocks, [conDefId, conClearId, conInitSize, conInitColor, conInitBright, conInitGhost,
+      conInitLayer, conInitAlign, conInitLS, conInitX, conInitY, conInitDT, conSetI,
+      conOuterRepeat, conFinalIf]);
+  } // end if (textInputMode === "console")
 
   // ── Script 6: Custom block ── テキストをすべてクリアする ──
   // This is the warp clear block called directly by テキストを表示する (no broadcast overhead)
@@ -2160,6 +2820,22 @@ export function generateScratchProject(
     [varFmtFactor]: ["__fmt_factor", 1],
     [varFmtInt]: ["__fmt_int", 0],
     [varFmtMinStr]: ["__fmt_min_str", ""],
+    // Mode 2 (richtext) tag-stripping variables
+    ...(textInputMode === "richtext" ? {
+      [varPpBuf]: ["__pp_buf", ""],
+      [varPpI]: ["__pp_i", 0],
+      [varPpInTag]: ["__pp_inTag", 0],
+      [varPpCh]: ["__pp_ch", ""],
+    } : {}),
+    // Mode 3 (console) parsing variables
+    ...(textInputMode === "console" ? {
+      [varConI]: ["__con_i", 0],
+      [varConLine]: ["__con_line", ""],
+      [varConColPos]: ["__con_colPos", 0],
+      [varConJ]: ["__con_j", 0],
+      [varConKey]: ["__con_key", ""],
+      [varConVal]: ["__con_val", ""],
+    } : {}),
   };
 
   // ── Assemble targets ──
@@ -2202,6 +2878,9 @@ export function generateScratchProject(
     lists: {
       [listFontConfig]: ["Font_Config", fontConfigData],
       [listInstruction]: ["取扱説明書", instructionData],
+      ...(textInputMode === "console" ? {
+        [listConsole]: ["文字表示コンソール", []],
+      } : {}),
     },
     broadcasts: {
       [broadcastRender]: "__font_render",
