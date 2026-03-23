@@ -144,40 +144,6 @@ function mkLetterOf(
   return bLetter;
 }
 
-// ── Helper: build "item# of (X) in [list]" block ──
-function mkItemNumOf(
-  blocks: Record<string, ScratchBlock>,
-  itemBlockId: string,
-  listName: string, listId: string
-): string {
-  const bItemNum = uid();
-  mk(blocks, bItemNum, "data_itemnumoflist", {
-    ITEM: blockInputStr(itemBlockId),
-  }, { LIST: [listName, listId] });
-  setParent(blocks, itemBlockId, bItemNum);
-  return bItemNum;
-}
-
-// ── Helper: build "item (expr + 1) of [list]" block ──
-function mkItemOfList(
-  blocks: Record<string, ScratchBlock>,
-  indexVarId: string, indexVarName: string,
-  listName: string, listId: string
-): string {
-  const bAddOne = uid(), bAddVar = uid(), bItemVal = uid();
-  mk(blocks, bAddVar, "data_variable", {}, { VARIABLE: [indexVarName, indexVarId] });
-  setParent(blocks, bAddVar, bAddOne);
-  mk(blocks, bAddOne, "operator_add", {
-    NUM1: blockInput(bAddVar),
-    NUM2: numLit(1),
-  }, {});
-  setParent(blocks, bAddOne, bItemVal);
-  mk(blocks, bItemVal, "data_itemoflist", {
-    INDEX: blockInput(bAddOne, 1),
-  }, { LIST: [listName, listId] });
-  return bItemVal;
-}
-
 // ── Build the block sequence that renders a single character ──
 // Returns [firstBlockId, lastBlockId]
 function buildRenderCharBlocks(
@@ -414,7 +380,7 @@ export function generateScratchProject(
     varBsHi,
     varBsMid,
     varBsMidChar,
-  }, warpStr, [1600, 0]);
+  }, [1600, 0]);
   Object.assign(blocks, bsInfo.blocks);
   const bsArgTargetId = bsInfo.argTargetId;
 

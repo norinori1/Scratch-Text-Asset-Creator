@@ -137,12 +137,10 @@ export const BSEARCH_PROC_CODE = "__font_bsearch %s";
  * - `__font_bsearch_result` に advance width (number) をセットする。未ヒット時は "" をセット。
  *
  * @param varIds   バイナリサーチが参照する変数・リストの Scratch ID セット
- * @param warpStr  "true" または "false"（親ブロックの warp 設定に合わせる）
  * @param xy       Scratch エディタ上の配置座標（省略可）
  */
 export function generateBinarySearchBlocks(
   varIds: BinarySearchVarIds,
-  warpStr: string,
   xy?: [number, number]
 ): BinarySearchBlockInfo {
   const blocks: ScratchBlockMap = {};

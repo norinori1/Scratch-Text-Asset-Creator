@@ -24,7 +24,7 @@ describe("BSEARCH_PROC_CODE", () => {
 
 describe("generateBinarySearchBlocks", () => {
   const varIds = makeMockVarIds();
-  const info = generateBinarySearchBlocks(varIds, "true");
+  const info = generateBinarySearchBlocks(varIds);
   const { blocks, defId, procCode, argTargetId } = info;
 
   it("returns a non-empty blocks map", () => {
@@ -150,7 +150,7 @@ describe("generateBinarySearchBlocks", () => {
   });
 
   it("accepts custom xy coordinates", () => {
-    const info2 = generateBinarySearchBlocks(makeMockVarIds(), "true", [100, 200]);
+    const info2 = generateBinarySearchBlocks(makeMockVarIds(), [100, 200]);
     const def = info2.blocks[info2.defId];
     expect(def.x).toBe(100);
     expect(def.y).toBe(200);
