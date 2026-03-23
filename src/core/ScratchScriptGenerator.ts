@@ -1875,7 +1875,7 @@ export function generateScratchProject(
     const conInitY      = buildFontConfigSet(varY,           "__font_y",             2);
     const conInitDT = uid();
     mk(blocks, conInitDT, "data_setvariableto", { VALUE: strLit("") },
-      { VARIABLE: ["__font_displayText", varDisplayText] });
+      { VARIABLE: ["__con_rawText", varConRawText] });
 
     // 3. set __con_i = 1
     const conSetI = uid();
@@ -1929,29 +1929,51 @@ export function generateScratchProject(
     mk(blocks, conLineEqSep, "operator_equals",
       { OPERAND1: blockInputStr(conLineVarSep), OPERAND2: strLit("---") }, {});
 
-    // flush if displayText != "" (called on ---)
+    // flush if __con_rawText != "" (called on ---)
     const conDTVarEmp = uid(), conDTEqEmp = uid(), conNotDTEmp = uid();
-    mk(blocks, conDTVarEmp, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
+    mk(blocks, conDTVarEmp, "data_variable", {}, { VARIABLE: ["__con_rawText", varConRawText] });
     setParent(blocks, conDTVarEmp, conDTEqEmp);
     mk(blocks, conDTEqEmp, "operator_equals",
       { OPERAND1: blockInputStr(conDTVarEmp), OPERAND2: strLit("") }, {});
     setParent(blocks, conDTEqEmp, conNotDTEmp);
     mk(blocks, conNotDTEmp, "operator_not", { OPERAND: boolInput(conDTEqEmp) }, {});
 
-    // call doRender (inside flush)
+    // flush body: delete rq lists, clear displayText, preprocess rawText, rt_doRender, reset rawText
+    const conFlushDelX  = uid(); mk(blocks, conFlushDelX,  "data_deletealloflist", {}, { LIST: ["__font_rq_x",      listRqX]      });
+    const conFlushDelY  = uid(); mk(blocks, conFlushDelY,  "data_deletealloflist", {}, { LIST: ["__font_rq_y",      listRqY]      });
+    const conFlushDelSz = uid(); mk(blocks, conFlushDelSz, "data_deletealloflist", {}, { LIST: ["__font_rq_size",   listRqSize]   });
+    const conFlushDelCo = uid(); mk(blocks, conFlushDelCo, "data_deletealloflist", {}, { LIST: ["__font_rq_color",  listRqColor]  });
+    const conFlushDelGh = uid(); mk(blocks, conFlushDelGh, "data_deletealloflist", {}, { LIST: ["__font_rq_ghost",  listRqGhost]  });
+    const conFlushDelBr = uid(); mk(blocks, conFlushDelBr, "data_deletealloflist", {}, { LIST: ["__font_rq_bright", listRqBright] });
+    const conFlushClearDT = uid();
+    mk(blocks, conFlushClearDT, "data_setvariableto", { VALUE: strLit("") },
+      { VARIABLE: ["__font_displayText", varDisplayText] });
+    // call __font_preprocess(__con_rawText)
+    const conFlushRawVar = uid();
+    mk(blocks, conFlushRawVar, "data_variable", {}, { VARIABLE: ["__con_rawText", varConRawText] });
+    const conFlushCallPp = uid();
+    setParent(blocks, conFlushRawVar, conFlushCallPp);
+    mk(blocks, conFlushCallPp, "procedures_call", {
+      [ppArgTextId]: [3, conFlushRawVar, [P_TEXT, ""]],
+    }, {}, false, false, undefined, {
+      tagName: "mutation", children: [],
+      proccode: "__font_preprocess %s",
+      argumentids: JSON.stringify([ppArgTextId]),
+      warp: "true",
+    });
+    // call __font_rt_doRender
     const conCallRenderFlush = uid();
     mk(blocks, conCallRenderFlush, "procedures_call", {}, {}, false, false, undefined, {
-      tagName: "mutation",
-      children: [],
-      proccode: doRenderProcCode,
+      tagName: "mutation", children: [],
+      proccode: "__font_rt_doRender",
       argumentids: JSON.stringify([]),
       warp: "true",
     });
 
-    // reset displayText + state vars after flush
+    // reset __con_rawText + state vars after flush
     const conResetDT = uid();
     mk(blocks, conResetDT, "data_setvariableto", { VALUE: strLit("") },
-      { VARIABLE: ["__font_displayText", varDisplayText] });
+      { VARIABLE: ["__con_rawText", varConRawText] });
     const conResetSize  = buildFontConfigSet(varSize,          "__font_size",           3);
     const conResetColor = buildFontConfigSet(varColor,         "__font_color",          4);
     const conResetBright = buildFontConfigSet(varBrightness,   "__font_brightness",     5);
@@ -1961,14 +1983,15 @@ export function generateScratchProject(
     const conResetLS     = buildFontConfigSet(varLetterSpacing, "__font_letterSpacing", 9);
     const conResetX      = buildFontConfigSet(varX,            "__font_x",              1);
     const conResetY      = buildFontConfigSet(varY,            "__font_y",              2);
-    chain(blocks, [conCallRenderFlush, conResetDT, conResetSize, conResetColor, conResetBright,
+    chain(blocks, [conFlushDelX, conFlushDelY, conFlushDelSz, conFlushDelCo, conFlushDelGh, conFlushDelBr,
+      conFlushClearDT, conFlushCallPp, conCallRenderFlush, conResetDT, conResetSize, conResetColor, conResetBright,
       conResetGhost, conResetLayer, conResetAlign, conResetLS, conResetX, conResetY]);
 
     const conIfHasDT = uid();
     setParent(blocks, conNotDTEmp, conIfHasDT);
-    setParent(blocks, conCallRenderFlush, conIfHasDT);
+    setParent(blocks, conFlushDelX, conIfHasDT);
     mk(blocks, conIfHasDT, "control_if",
-      { CONDITION: boolInput(conNotDTEmp), SUBSTACK: substackInput(conCallRenderFlush) }, {});
+      { CONDITION: boolInput(conNotDTEmp), SUBSTACK: substackInput(conFlushDelX) }, {});
 
     // ── key:value parse branch (else branch of --- check) ──
     // Find colon position
@@ -2146,7 +2169,7 @@ export function generateScratchProject(
       return kIf;
     }
 
-    const dText   = buildKeyDispatch(varDisplayText,    "__font_displayText",   "text",          true);
+    const dText   = buildKeyDispatch(varConRawText,     "__con_rawText",        "text",          true);
     const dX      = buildKeyDispatch(varX,              "__font_x",             "x");
     const dY      = buildKeyDispatch(varY,              "__font_y",             "y");
     const dSize   = buildKeyDispatch(varSize,           "__font_size",          "size");
@@ -2209,25 +2232,48 @@ export function generateScratchProject(
 
     // Final flush
     const conFinalDTVar = uid(), conFinalDTEq = uid(), conFinalNotEq = uid();
-    mk(blocks, conFinalDTVar, "data_variable", {}, { VARIABLE: ["__font_displayText", varDisplayText] });
+    mk(blocks, conFinalDTVar, "data_variable", {}, { VARIABLE: ["__con_rawText", varConRawText] });
     setParent(blocks, conFinalDTVar, conFinalDTEq);
     mk(blocks, conFinalDTEq, "operator_equals",
       { OPERAND1: blockInputStr(conFinalDTVar), OPERAND2: strLit("") }, {});
     setParent(blocks, conFinalDTEq, conFinalNotEq);
     mk(blocks, conFinalNotEq, "operator_not", { OPERAND: boolInput(conFinalDTEq) }, {});
+    // flush body: delete rq lists, clear displayText, preprocess rawText, rt_doRender
+    const conFinalDelX  = uid(); mk(blocks, conFinalDelX,  "data_deletealloflist", {}, { LIST: ["__font_rq_x",      listRqX]      });
+    const conFinalDelY  = uid(); mk(blocks, conFinalDelY,  "data_deletealloflist", {}, { LIST: ["__font_rq_y",      listRqY]      });
+    const conFinalDelSz = uid(); mk(blocks, conFinalDelSz, "data_deletealloflist", {}, { LIST: ["__font_rq_size",   listRqSize]   });
+    const conFinalDelCo = uid(); mk(blocks, conFinalDelCo, "data_deletealloflist", {}, { LIST: ["__font_rq_color",  listRqColor]  });
+    const conFinalDelGh = uid(); mk(blocks, conFinalDelGh, "data_deletealloflist", {}, { LIST: ["__font_rq_ghost",  listRqGhost]  });
+    const conFinalDelBr = uid(); mk(blocks, conFinalDelBr, "data_deletealloflist", {}, { LIST: ["__font_rq_bright", listRqBright] });
+    const conFinalClearDT = uid();
+    mk(blocks, conFinalClearDT, "data_setvariableto", { VALUE: strLit("") },
+      { VARIABLE: ["__font_displayText", varDisplayText] });
+    const conFinalRawVar = uid();
+    mk(blocks, conFinalRawVar, "data_variable", {}, { VARIABLE: ["__con_rawText", varConRawText] });
+    const conFinalCallPp = uid();
+    setParent(blocks, conFinalRawVar, conFinalCallPp);
+    mk(blocks, conFinalCallPp, "procedures_call", {
+      [ppArgTextId]: [3, conFinalRawVar, [P_TEXT, ""]],
+    }, {}, false, false, undefined, {
+      tagName: "mutation", children: [],
+      proccode: "__font_preprocess %s",
+      argumentids: JSON.stringify([ppArgTextId]),
+      warp: "true",
+    });
     const conFinalRender = uid();
     mk(blocks, conFinalRender, "procedures_call", {}, {}, false, false, undefined, {
-      tagName: "mutation",
-      children: [],
-      proccode: doRenderProcCode,
+      tagName: "mutation", children: [],
+      proccode: "__font_rt_doRender",
       argumentids: JSON.stringify([]),
       warp: "true",
     });
+    chain(blocks, [conFinalDelX, conFinalDelY, conFinalDelSz, conFinalDelCo, conFinalDelGh, conFinalDelBr,
+      conFinalClearDT, conFinalCallPp, conFinalRender]);
     const conFinalIf = uid();
     setParent(blocks, conFinalNotEq, conFinalIf);
-    setParent(blocks, conFinalRender, conFinalIf);
+    setParent(blocks, conFinalDelX, conFinalIf);
     mk(blocks, conFinalIf, "control_if",
-      { CONDITION: boolInput(conFinalNotEq), SUBSTACK: substackInput(conFinalRender) }, {});
+      { CONDITION: boolInput(conFinalNotEq), SUBSTACK: substackInput(conFinalDelX) }, {});
 
     chain(blocks, [conDefId, conClearId, conInitSize, conInitColor, conInitBright, conInitGhost,
       conInitLayer, conInitAlign, conInitLS, conInitX, conInitY, conInitDT, conSetI,
@@ -3305,8 +3351,8 @@ export function generateScratchProject(
     [varFmtFactor]: ["__fmt_factor", 1],
     [varFmtInt]: ["__fmt_int", 0],
     [varFmtMinStr]: ["__fmt_min_str", ""],
-    // Mode 2 (richtext): inline-tag parser variables
-    ...(textInputMode === "richtext" ? {
+    // Mode 2 (richtext) and Mode 3 (console): inline-tag parser variables
+    ...(textInputMode === "richtext" || textInputMode === "console" ? {
       [varPpI]:        ["__pp_i",        0   ],
       [varPpInTag]:    ["__pp_inTag",    0   ],
       [varPpCh]:       ["__pp_ch",       ""  ],
@@ -3329,6 +3375,7 @@ export function generateScratchProject(
       [varConJ]: ["__con_j", 0],
       [varConKey]: ["__con_key", ""],
       [varConVal]: ["__con_val", ""],
+      [varConRawText]: ["__con_rawText", ""],
     } : {}),
   };
 
@@ -3339,7 +3386,7 @@ export function generateScratchProject(
     variables: fontCharVariables,
     lists: {
       [listCharMap]: ["__font_charMap", charMapData],
-      ...(textInputMode === "richtext" ? {
+      ...(textInputMode === "richtext" || textInputMode === "console" ? {
         [listRqX]:     ["__font_rq_x",      []],
         [listRqY]:     ["__font_rq_y",      []],
         [listRqSize]:  ["__font_rq_size",   []],
