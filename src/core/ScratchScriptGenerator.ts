@@ -331,8 +331,12 @@ export function generateScratchProject(
   // Mode 3 (console): console-script parsing variables (__con_*)
   const varConI = uid(), varConLine = uid(), varConColPos = uid();
   const varConJ = uid(), varConKey = uid(), varConVal = uid();
+  const varConRawText = uid(); // raw text with tags, used before preprocess
   // Mode 3 list
   const listConsole = uid();
+  // Shared argument IDs for __font_preprocess / __font_pp_apply_tag (Mode 2 and Mode 3)
+  const ppArgTextId = uid();
+  const apArgTagId  = uid();
 
   // Pre-populate __font_charMap: [char, advanceWidth, char, advanceWidth, ...]
   const charMapData: (string | number)[] = [];
@@ -1119,11 +1123,9 @@ export function generateScratchProject(
   chain(blocks, [defId, bSetDT, bSetX, bSetY, bSetSizeVar, bSetColorVar, bSetBrightVar, bSetGhostVar, bSetLayerVar, bSetAlignVar, bSetLSVar, clearBlockId, bCallDoRender]);
   } // end if (textInputMode === "param")
 
-  // ── Script 5 (Mode 2): テキストを表示する (richText) x:(x) y:(y) ──
-  if (textInputMode === "richtext") {
-    // Argument IDs shared between prototypes and their call sites
-    const ppArgTextId = uid(); // __font_preprocess (text)
-    const apArgTagId  = uid(); // __font_pp_apply_tag (tagStr)
+  // ── Script 5 (Mode 2 & shared helpers): テキストを表示する / __font_preprocess / __font_rt_doRender ──
+  if (textInputMode === "richtext" || textInputMode === "console") {
+    // ppArgTextId / apArgTagId already declared at top of function (shared with console mode)
 
     // ── local helpers (close over `blocks`) ─────────────────────────────────
     /** argument_reporter_string_number for argName */
@@ -1207,8 +1209,9 @@ export function generateScratchProject(
       mAnd(mEqStr(mLtArg("tagStr", pos1), c1), mEqStr(mLtArg("tagStr", pos2), c2));
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // テキストを表示する (text) x:(x) y:(y) 揃え:(align)  — warp
+    // テキストを表示する (text) x:(x) y:(y) 揃え:(align)  — warp  [Mode 2 only]
     // ═══════════════════════════════════════════════════════════════════════════
+    if (textInputMode === "richtext") {
     const procCode2 = "テキストを表示する %s x: %s y: %s 揃え: %s";
     const rt2TextId = uid(), rt2XId = uid(), rt2YId = uid(), rt2AlignId = uid();
     const rt2ProtoId = uid(), rt2DefId = uid();
@@ -1406,6 +1409,7 @@ export function generateScratchProject(
       rt2DelX, rt2DelY, rt2DelSz, rt2DelCo, rt2DelGh, rt2DelBr,
       rt2ClearDT, rt2CallPp, rt2ClearId, rt2CallRtRender,
     ]);
+    } // end if (textInputMode === "richtext") — Mode 2 main block
 
     // ═══════════════════════════════════════════════════════════════════════════
     // __font_pp_apply_tag (tagStr)  — warp
