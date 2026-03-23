@@ -38,6 +38,8 @@ export interface GlyphRenderOptions {
 export type OutputFormat = "svg" | "png";
 export type RenderMode = "clone" | "pen";
 export type TextAlign = "left" | "center" | "right";
+/** テキスト入力モード (§15) */
+export type TextInputMode = "param" | "richtext" | "console";
 
 export interface ExportOptions {
   /** Costume image format: SVG (vector, smaller) or PNG (raster, compatible) */

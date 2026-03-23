@@ -2,49 +2,63 @@
  * Rich Text Tag Parser
  *
  * Unity TextMeshPro 互換のインラインマークアップを解析する。
- * 仕様: docs/specifications/spec-v3.md §15
+ * 仕様: docs/specifications/spec-v4.md §15
  *
- * 対応タグ:
- *   <c=#RRGGBB>  文字色
- *   <s=N>        サイズ (%)
- *   <g=N>        透明度 (0〜100)
- *   <b=N>        明るさ (-100〜100)
- *   <wave>       波打ちアニメーション
- *   <shake>      振動アニメーション
- *   <sp=N>       タイプライター速度上書き (ms/文字)
+ * ## サポートタグ（Mode 2）
+ *   <c=N>         COLOR エフェクト値を直接指定 (0〜200)
+ *   <ch=#RRGGBB>  CSS カラー → COLOR 近似変換
+ *   <s=N>         サイズ (%)
+ *   <g=N>         透明度 (0〜100)
+ *   <b=N>         明るさ (-100〜100)
+ *   <wave>        波打ちアニメーション
+ *   <shake>       振動アニメーション
+ *   <sp=N>        タイプライター速度上書き (ms/文字)
+ *   <br>          改行（単独タグ）
+ *
+ * **制約:** 同名タグのネスト（例: `<c=100><c=50>text</c></c>`）はサポートしない。
+ * 外側の `<c>` が最初の `</c>` で閉じられるため、期待通りに動作しない。
+ * 異なるタグのネスト（例: `<s=200><c=100>text</c></s>`）は正しく動作する。
+ *
+ * ## rtQueue エントリ形式（全モード共通, §15-D）
+ *   "文字|x|y|size|colorEffect|ghost|brightness|animType|animAmp|animSpd|typeDelay"
  */
 
 export interface RtSegment {
   text: string;
-  color?: string;        // CSS カラー文字列 (例: "#FF0000")
+  colorEffect?: number;  // 0〜200（Scratch COLOR エフェクト値）
   size?: number;         // % (デフォルト 100)
   ghost?: number;        // 0〜100
   brightness?: number;   // -100〜100
   wave?: boolean;
   shake?: boolean;
-  typeSpeed?: number;    // ms/文字
+  typeDelay?: number;    // ms/文字
 }
 
 /**
  * リッチテキスト文字列を RtSegment[] に分解する。
  * 不正タグはそのままプレーンテキストとして扱う（フォールバック）。
  *
- * **制約:** 同名タグのネスト（例: `<c=red><c=blue>text</c></c>`）はサポートしない。
+ * **制約:** 同名タグのネスト（例: `<c=100><c=50>text</c></c>`）はサポートしない。
  * 外側の `<c>` が最初の `</c>` で閉じられるため、期待通りに動作しない。
- * 異なるタグのネスト（例: `<s=200><c=#F00>text</c></s>`）は正しく動作する。
+ * 異なるタグのネスト（例: `<s=200><c=100>text</c></s>`）は正しく動作する。
+ *
+ * `<br>` は単独の改行タグとして処理され、`\n` に変換される。
  */
 export function parseRichText(input: string): RtSegment[] {
+  // まず <br> を \n に展開する（単独タグなので事前変換）
+  const preprocessed = input.replace(/<br\s*\/?>/gi, "\n");
+
   const segments: RtSegment[] = [];
   const tagRegex = /<(\w+)(?:=([^>]*))?>(.*?)<\/\1>/gs;
   let lastIndex = 0;
 
-  for (const match of input.matchAll(tagRegex)) {
+  for (const match of preprocessed.matchAll(tagRegex)) {
     const [fullMatch, tagName, tagValue, inner] = match;
     const start = match.index!;
 
     // タグ前のプレーンテキスト
     if (start > lastIndex) {
-      segments.push({ text: input.slice(lastIndex, start) });
+      segments.push({ text: preprocessed.slice(lastIndex, start) });
     }
 
     // タグ付きセグメント（再帰パース対応）
@@ -57,8 +71,8 @@ export function parseRichText(input: string): RtSegment[] {
   }
 
   // 末尾のプレーンテキスト
-  if (lastIndex < input.length) {
-    segments.push({ text: input.slice(lastIndex) });
+  if (lastIndex < preprocessed.length) {
+    segments.push({ text: preprocessed.slice(lastIndex) });
   }
 
   return segments;
@@ -66,13 +80,14 @@ export function parseRichText(input: string): RtSegment[] {
 
 function applyTag(seg: RtSegment, tag: string, value?: string): RtSegment {
   switch (tag) {
-    case "c":    return { ...seg, color: value };
+    case "c":    return { ...seg, colorEffect: Number(value) };
+    case "ch":   return { ...seg, colorEffect: value ? cssColorToScratchColorEffect(value) : 0 };
     case "s":    return { ...seg, size: Number(value) };
     case "g":    return { ...seg, ghost: Number(value) };
     case "b":    return { ...seg, brightness: Number(value) };
     case "wave": return { ...seg, wave: true };
     case "shake": return { ...seg, shake: true };
-    case "sp":   return { ...seg, typeSpeed: Number(value) };
+    case "sp":   return { ...seg, typeDelay: Number(value) };
     default:     return seg; // 未知タグは無視
   }
 }
@@ -119,21 +134,173 @@ function hexToHsl(hex: string): Hsl {
 }
 
 /**
- * RtSegment[] を __font_rtQueue エントリ形式にシリアライズする。
- * 形式: "文字|size|color|ghost|brightness|animType|animParam1|typeSpeed"
+ * RtSegment[] を __font_rtQueue エントリ形式（全モード共通, §15-D）にシリアライズする。
+ *
+ * 形式: "文字|x|y|size|colorEffect|ghost|brightness|animType|animAmp|animSpd|typeDelay"
+ *
+ * @param segments  parseRichText() の出力
+ * @param startX    テキスト描画の開始 X 座標
+ * @param startY    テキスト描画の開始 Y 座標
+ * @param advances  文字 → advance width のマップ（バイナリサーチ結果から構築）
+ * @param options   省略可能な描画オプション
  */
-export function serializeSegmentsToQueue(segments: RtSegment[]): string[] {
+export function serializeSegmentsToQueue(
+  segments: RtSegment[],
+  startX = 0,
+  startY = 0,
+  advances: Record<string, number> = {},
+  options: { letterSpacing?: number } = {}
+): string[] {
   const entries: string[] = [];
+  const ls = options.letterSpacing ?? 0;
+  let curX = startX;
+  let curY = startY;
+
   for (const seg of segments) {
     for (const ch of Array.from(seg.text)) {
       const size = seg.size ?? 100;
-      const colorEffect = seg.color ? cssColorToScratchColorEffect(seg.color) : 0;
+      const colorEffect = seg.colorEffect ?? 0;
       const ghost = seg.ghost ?? 0;
       const brightness = seg.brightness ?? 0;
-      const animType = seg.wave ? "wave" : seg.shake ? "shake" : "none";
-      const typeSpeed = seg.typeSpeed ?? 60;
-      entries.push(`${ch}|${size}|${colorEffect}|${ghost}|${brightness}|${animType}|${typeSpeed}`);
+      const animType = seg.wave ? "wave" : seg.shake ? "shake" : "";
+      const animAmp = 0;
+      const animSpd = 0;
+      const typeDelay = seg.typeDelay ?? 0;
+
+      if (ch === "\n") {
+        // 改行マーカー
+        entries.push(`\n|${curX}|${curY}|0|0|0|0|||0`);
+        curX = startX;
+        curY -= 72; // デフォルト行間（実際の値は呼び出し側で調整可）
+        continue;
+      }
+
+      entries.push(
+        `${ch}|${curX}|${curY}|${size}|${colorEffect}|${ghost}|${brightness}|${animType}|${animAmp}|${animSpd}|${typeDelay}`
+      );
+
+      const aw = advances[ch] ?? 0;
+      curX += aw + ls;
     }
   }
+
   return entries;
 }
+
+// ── Mode 3: コンソールスクリプトパーサー ─────────────────────────────────────
+
+/**
+ * Mode 3 コンソールスクリプトの1ブロックを表す。
+ * 仕様: docs/specifications/spec-v4.md §15-C
+ */
+export interface ConsoleBlock {
+  text: string;
+  x: number;
+  y: number;
+  size: number;
+  colorEffect: number;   // 0〜200（直接値または colorHex からの変換値）
+  ghost: number;
+  brightness: number;
+  align: "left" | "center" | "right";
+  animType: "wave" | "shake" | "fade" | "bounce" | "none" | "";
+  animAmp: number;
+  animSpeed: number;
+  typeDelay: number;
+  maxWidth: number;
+  letterSpacing: number;
+  layer: number;
+  lineHeight: number;
+}
+
+const DEFAULT_CONSOLE_BLOCK: ConsoleBlock = {
+  text: "",
+  x: 0,
+  y: 0,
+  size: 100,
+  colorEffect: 0,
+  ghost: 0,
+  brightness: 0,
+  align: "left",
+  animType: "",
+  animAmp: 8,
+  animSpeed: 5,
+  typeDelay: 0,
+  maxWidth: 0,
+  letterSpacing: 0,
+  layer: 1,
+  lineHeight: 0,
+};
+
+/**
+ * Mode 3 コンソールスクリプト文字列を ConsoleBlock[] に解析する。
+ * 仕様: docs/specifications/spec-v4.md §15-C
+ *
+ * - 空行・`//` で始まる行はコメントとして無視
+ * - `---` はブロック区切り
+ * - 各行は `キー:値` 形式（最初の `:` のみ区切りとして扱う → 値にコロン含み可）
+ */
+export function parseConsoleScript(script: string): ConsoleBlock[] {
+  const blocks: ConsoleBlock[] = [];
+  let current: ConsoleBlock = { ...DEFAULT_CONSOLE_BLOCK };
+  let hasContent = false;
+
+  for (const rawLine of script.split("\n")) {
+    const line = rawLine.trimEnd(); // 末尾空白のみ除去（先頭は保持）
+
+    // 空行・コメント行
+    if (line.trim() === "" || line.trimStart().startsWith("//")) {
+      continue;
+    }
+
+    // ブロック区切り
+    if (line.trim() === "---") {
+      if (hasContent) {
+        blocks.push(current);
+        current = { ...DEFAULT_CONSOLE_BLOCK };
+        hasContent = false;
+      }
+      continue;
+    }
+
+    // "キー:値" パース（最初の `:` だけを区切りとする）
+    const colonIdx = line.indexOf(":");
+    if (colonIdx === -1) continue;
+
+    const key = line.slice(0, colonIdx).trim();
+    const val = line.slice(colonIdx + 1); // トリム不要（値にスペース含み可）
+
+    hasContent = true;
+    applyConsoleKey(current, key, val);
+  }
+
+  // 末尾 "---" なしでも最終ブロックをフラッシュ
+  if (hasContent) {
+    blocks.push(current);
+  }
+
+  return blocks;
+}
+
+function applyConsoleKey(block: ConsoleBlock, key: string, val: string): void {
+  switch (key) {
+    case "text":          block.text          = val; break;
+    case "x":             block.x             = Number(val); break;
+    case "y":             block.y             = Number(val); break;
+    case "size":          block.size          = Number(val); break;
+    case "color":         block.colorEffect   = Number(val); break;
+    case "colorHex":      block.colorEffect   = cssColorToScratchColorEffect(val.trim()); break;
+    case "ghost":         block.ghost         = Number(val); break;
+    case "brightness":    block.brightness    = Number(val); break;
+    case "align":         block.align         = val.trim() as ConsoleBlock["align"]; break;
+    case "anim":          block.animType      = val.trim() as ConsoleBlock["animType"]; break;
+    case "animAmp":       block.animAmp       = Number(val); break;
+    case "animSpeed":     block.animSpeed     = Number(val); break;
+    case "typeDelay":     block.typeDelay     = Number(val); break;
+    case "maxWidth":      block.maxWidth      = Number(val); break;
+    case "letterSpacing": block.letterSpacing = Number(val); break;
+    case "layer":         block.layer         = Number(val); break;
+    case "lineHeight":    block.lineHeight    = Number(val); break;
+    // 未知キーは無視
+  }
+}
+

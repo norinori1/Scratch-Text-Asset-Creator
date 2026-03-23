@@ -1,7 +1,9 @@
 import { create } from "zustand";
 import type opentype from "opentype.js";
-import type { CharsetId, ExportOptions, GlyphAsset, GlyphRenderOptions } from "../types";
+import type { CharsetId, ExportOptions, GlyphAsset, GlyphRenderOptions, TextInputMode } from "../types";
 import { DEFAULT_EXPORT_OPTIONS } from "../core/Sb3Builder";
+import type { RtSegment } from "../core/RichTextTagParser";
+import { parseRichText } from "../core/RichTextTagParser";
 
 interface AppState {
   font: opentype.Font | null;
@@ -15,6 +17,15 @@ interface AppState {
   exportProgress: number;
   exportPhase: string;
   isExporting: boolean;
+
+  // テキスト入力モード (§15)
+  textInputMode: TextInputMode;
+  setTextInputMode: (mode: TextInputMode) => void;
+
+  // Mode 2 プレビュー用
+  richTextPreviewInput: string;
+  setRichTextPreviewInput: (input: string) => void;
+  parsedRichTextSegments: RtSegment[];
 
   setFont: (font: opentype.Font, fileName: string) => void;
   toggleCharset: (id: CharsetId) => void;
@@ -45,6 +56,14 @@ export const useAppStore = create<AppState>((set) => ({
   exportProgress: 0,
   exportPhase: "",
   isExporting: false,
+
+  textInputMode: "param",
+  setTextInputMode: (mode) => set({ textInputMode: mode }),
+
+  richTextPreviewInput: "",
+  setRichTextPreviewInput: (input) =>
+    set({ richTextPreviewInput: input, parsedRichTextSegments: parseRichText(input) }),
+  parsedRichTextSegments: [],
 
   setFont: (font, fileName) => set({ font, fontFileName: fileName, glyphAssets: [] }),
   toggleCharset: (id) =>
