@@ -38,6 +38,8 @@ export interface GlyphRenderOptions {
 export type OutputFormat = "svg" | "png";
 export type RenderMode = "clone" | "pen";
 export type TextAlign = "left" | "center" | "right";
+/** テキスト入力モード (§15) */
+export type TextInputMode = "param" | "richtext" | "console";
 
 export interface ExportOptions {
   /** Costume image format: SVG (vector, smaller) or PNG (raster, compatible) */
@@ -50,6 +52,8 @@ export interface ExportOptions {
   align: TextAlign;
   /** Default letter spacing (pixels) – sets the initial value of __font_letterSpacing */
   letterSpacing: number;
+  /** テキスト入力モード (§15): param = 10引数, richtext = インラインタグ, console = コンソールスクリプト */
+  textInputMode?: TextInputMode;
 }
 
 export interface GlyphAsset {
