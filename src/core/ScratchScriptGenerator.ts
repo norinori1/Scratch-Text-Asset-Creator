@@ -1207,39 +1207,144 @@ export function generateScratchProject(
       mAnd(mEqStr(mLtArg("tagStr", pos1), c1), mEqStr(mLtArg("tagStr", pos2), c2));
 
     // ═══════════════════════════════════════════════════════════════════════════
-    // テキストを表示する (text) x:(x) y:(y)  — warp
+    // テキストを表示する (text) x:(x) y:(y) 揃え:(align)  — warp
     // ═══════════════════════════════════════════════════════════════════════════
-    const procCode2 = "テキストを表示する %s x: %s y: %s";
-    const rt2TextId = uid(), rt2XId = uid(), rt2YId = uid();
+    const procCode2 = "テキストを表示する %s x: %s y: %s 揃え: %s";
+    const rt2TextId = uid(), rt2XId = uid(), rt2YId = uid(), rt2AlignId = uid();
     const rt2ProtoId = uid(), rt2DefId = uid();
-    const rt2TextShadow = mAR("text", true), rt2XShadow = mAR("x", true), rt2YShadow = mAR("y", true);
+    const rt2TextShadow = mAR("text", true), rt2XShadow = mAR("x", true), rt2YShadow = mAR("y", true), rt2AlignShadow = mAR("align", true);
     setParent(blocks, rt2TextShadow, rt2ProtoId);
     setParent(blocks, rt2XShadow, rt2ProtoId);
     setParent(blocks, rt2YShadow, rt2ProtoId);
+    setParent(blocks, rt2AlignShadow, rt2ProtoId);
     mk(blocks, rt2ProtoId, "procedures_prototype",
-      { [rt2TextId]: [1, rt2TextShadow], [rt2XId]: [1, rt2XShadow], [rt2YId]: [1, rt2YShadow] },
+      { [rt2TextId]: [1, rt2TextShadow], [rt2XId]: [1, rt2XShadow], [rt2YId]: [1, rt2YShadow], [rt2AlignId]: [1, rt2AlignShadow] },
       {}, false, true, undefined,
       {
         tagName: "mutation", children: [],
         proccode: procCode2,
-        argumentids: JSON.stringify([rt2TextId, rt2XId, rt2YId]),
-        argumentnames: JSON.stringify(["text", "x", "y"]),
-        argumentdefaults: JSON.stringify(["", "", ""]),
+        argumentids: JSON.stringify([rt2TextId, rt2XId, rt2YId, rt2AlignId]),
+        argumentnames: JSON.stringify(["text", "x", "y", "align"]),
+        argumentdefaults: JSON.stringify(["", "", "", ""]),
         warp: warpStr,
       });
     setParent(blocks, rt2ProtoId, rt2DefId);
     mk(blocks, rt2DefId, "procedures_definition", { custom_block: [1, rt2ProtoId] }, {}, true, false, [800, 0]);
 
-    // x/y from arg + Font_Config fallback; style from Font_Config
-    const rt2SetX      = buildFontConfigLookup(varX,            "__font_x",            "x", 1);
-    const rt2SetY      = buildFontConfigLookup(varY,            "__font_y",            "y", 2);
+    // x/y/align from arg + Font_Config fallback; other style from Font_Config
+    const rt2SetX      = buildFontConfigLookup(varX,            "__font_x",            "x",     1);
+    const rt2SetY      = buildFontConfigLookup(varY,            "__font_y",            "y",     2);
     const rt2SetSize   = buildFontConfigSet(varSize,            "__font_size",          3);
     const rt2SetColor  = buildFontConfigSet(varColor,           "__font_color",         4);
     const rt2SetBright = buildFontConfigSet(varBrightness,      "__font_brightness",    5);
     const rt2SetGhost  = buildFontConfigSet(varGhost,           "__font_ghost",         6);
     const rt2SetLayer  = buildFontConfigSet(varLayer,           "__font_layer",         7);
-    const rt2SetAlign  = buildFontConfigSet(varAlign,           "__font_align",         8, true);
+    const rt2SetAlign  = buildFontConfigLookup(varAlign,        "__font_align",         "align", 8, true);
     const rt2SetLS     = buildFontConfigSet(varLetterSpacing,   "__font_letterSpacing", 9);
+
+    // ── Alignment pre-pass: scan raw text, skip tag chars, accumulate totalWidth ──
+    // Only runs when align ≠ "left". Reuses __pp_* vars (preprocess reinitialises them).
+    // After counting, adjust __font_x: center → x - totalWidth/2, right → x - totalWidth.
+
+    // set totalWidth to 0; set __pp_i = 1; set __pp_inTag = 0
+    const rt2TwInit   = uid(); mk(blocks, rt2TwInit,   "data_setvariableto", { VALUE: numLit(0) }, { VARIABLE: ["__font_totalWidth", varTotalWidth] });
+    const rt2TwInitI  = uid(); mk(blocks, rt2TwInitI,  "data_setvariableto", { VALUE: numLit(1) }, { VARIABLE: ["__pp_i",            varPpI]        });
+    const rt2TwInitIT = uid(); mk(blocks, rt2TwInitIT, "data_setvariableto", { VALUE: numLit(0) }, { VARIABLE: ["__pp_inTag",        varPpInTag]    });
+
+    // set __pp_ch = letter(__pp_i) of [text arg]
+    const rt2TwSetCh = uid();
+    {
+      const iVar = uid(), textRep = mAR("text"), ltOf = uid();
+      mk(blocks, iVar, "data_variable", {}, { VARIABLE: ["__pp_i", varPpI] });
+      setParent(blocks, iVar, ltOf); setParent(blocks, textRep, ltOf);
+      mk(blocks, ltOf, "operator_letter_of", { LETTER: blockInput(iVar, 1), STRING: blockInputStr(textRep) }, {});
+      setParent(blocks, ltOf, rt2TwSetCh);
+      mk(blocks, rt2TwSetCh, "data_setvariableto", { VALUE: blockInputStr(ltOf) }, { VARIABLE: ["__pp_ch", varPpCh] });
+    }
+
+    // when inTag=1 and ch=">": set inTag=0
+    const rt2TwGtCond = uid();
+    { const chVar = uid(); mk(blocks, chVar, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] }); setParent(blocks, chVar, rt2TwGtCond); mk(blocks, rt2TwGtCond, "operator_equals", { OPERAND1: blockInputStr(chVar), OPERAND2: strLit(">") }, {}); }
+    const rt2TwResetIT = uid(); mk(blocks, rt2TwResetIT, "data_setvariableto", { VALUE: numLit(0) }, { VARIABLE: ["__pp_inTag", varPpInTag] });
+    const rt2TwIfGt = uid(); setParent(blocks, rt2TwGtCond, rt2TwIfGt); setParent(blocks, rt2TwResetIT, rt2TwIfGt);
+    mk(blocks, rt2TwIfGt, "control_if", { CONDITION: boolInput(rt2TwGtCond), SUBSTACK: substackInput(rt2TwResetIT) }, {});
+
+    // when inTag=0 and ch="<": set inTag=1
+    const rt2TwSetIT1 = uid(); mk(blocks, rt2TwSetIT1, "data_setvariableto", { VALUE: numLit(1) }, { VARIABLE: ["__pp_inTag", varPpInTag] });
+
+    // when inTag=0 and ch≠"<": bsearch + add to totalWidth
+    const rt2TwBsCall = uid();
+    {
+      const chVar = uid(), shadowBS = uid();
+      mk(blocks, chVar, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] });
+      mk(blocks, shadowBS, "argument_reporter_string_number", {}, { VALUE: ["target", null] }, false, true);
+      setParent(blocks, chVar, rt2TwBsCall); setParent(blocks, shadowBS, rt2TwBsCall);
+      mk(blocks, rt2TwBsCall, "procedures_call", {
+        [bsArgTargetId]: [3, chVar, shadowBS],
+      }, {}, false, false, undefined, { tagName: "mutation", children: [], proccode: BSEARCH_PROC_CODE, argumentids: JSON.stringify([bsArgTargetId]), warp: "true" });
+    }
+    const rt2TwBsCond = uid();
+    { const bsVar = uid(), bsEq = uid(); mk(blocks, bsVar, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] }); setParent(blocks, bsVar, bsEq); mk(blocks, bsEq, "operator_equals", { OPERAND1: blockInputStr(bsVar), OPERAND2: strLit("") }, {}); setParent(blocks, bsEq, rt2TwBsCond); mk(blocks, rt2TwBsCond, "operator_not", { OPERAND: boolInput(bsEq) }, {}); }
+    const rt2TwChgTW = uid();
+    { const bsVar = uid(), lsVar = uid(), addId = uid(); mk(blocks, bsVar, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] }); mk(blocks, lsVar, "data_variable", {}, { VARIABLE: ["__font_letterSpacing", varLetterSpacing] }); setParent(blocks, bsVar, addId); setParent(blocks, lsVar, addId); mk(blocks, addId, "operator_add", { NUM1: blockInput(bsVar), NUM2: blockInput(lsVar) }, {}); setParent(blocks, addId, rt2TwChgTW); mk(blocks, rt2TwChgTW, "data_changevariableby", { VALUE: blockInput(addId) }, { VARIABLE: ["__font_totalWidth", varTotalWidth] }); }
+    const rt2TwIfNE = uid(); setParent(blocks, rt2TwBsCond, rt2TwIfNE); setParent(blocks, rt2TwChgTW, rt2TwIfNE);
+    mk(blocks, rt2TwIfNE, "control_if", { CONDITION: boolInput(rt2TwBsCond), SUBSTACK: substackInput(rt2TwChgTW) }, {});
+    chain(blocks, [rt2TwBsCall, rt2TwIfNE]);
+
+    // inner if/else: ch="<" → open tag; else → bsearch
+    const rt2TwLtCond = uid();
+    { const chVar = uid(); mk(blocks, chVar, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] }); setParent(blocks, chVar, rt2TwLtCond); mk(blocks, rt2TwLtCond, "operator_equals", { OPERAND1: blockInputStr(chVar), OPERAND2: strLit("<") }, {}); }
+    const rt2TwInnerLt = uid();
+    setParent(blocks, rt2TwLtCond, rt2TwInnerLt); setParent(blocks, rt2TwSetIT1, rt2TwInnerLt); setParent(blocks, rt2TwBsCall, rt2TwInnerLt);
+    mk(blocks, rt2TwInnerLt, "control_if_else", { CONDITION: boolInput(rt2TwLtCond), SUBSTACK: substackInput(rt2TwSetIT1), SUBSTACK2: substackInput(rt2TwBsCall) }, {});
+
+    // outer if/else: inTag=1 → ifGt; else → innerLt
+    const rt2TwInTagCond = uid();
+    { const inTagVar = uid(); mk(blocks, inTagVar, "data_variable", {}, { VARIABLE: ["__pp_inTag", varPpInTag] }); setParent(blocks, inTagVar, rt2TwInTagCond); mk(blocks, rt2TwInTagCond, "operator_equals", { OPERAND1: blockInput(inTagVar), OPERAND2: numLit(1) }, {}); }
+    const rt2TwOuter = uid();
+    setParent(blocks, rt2TwInTagCond, rt2TwOuter); setParent(blocks, rt2TwIfGt, rt2TwOuter); setParent(blocks, rt2TwInnerLt, rt2TwOuter);
+    mk(blocks, rt2TwOuter, "control_if_else", { CONDITION: boolInput(rt2TwInTagCond), SUBSTACK: substackInput(rt2TwIfGt), SUBSTACK2: substackInput(rt2TwInnerLt) }, {});
+
+    // change __pp_i by 1
+    const rt2TwChgI = uid(); mk(blocks, rt2TwChgI, "data_changevariableby", { VALUE: numLit(1) }, { VARIABLE: ["__pp_i", varPpI] });
+    chain(blocks, [rt2TwSetCh, rt2TwOuter, rt2TwChgI]);
+
+    // repeat (length of [text arg])
+    const rt2TwRepeat = uid();
+    {
+      const textRep = mAR("text"), lenId = uid();
+      setParent(blocks, textRep, lenId);
+      mk(blocks, lenId, "operator_length", { STRING: blockInputStr(textRep) }, {});
+      setParent(blocks, lenId, rt2TwRepeat);
+      mk(blocks, rt2TwRepeat, "control_repeat", { TIMES: blockInput(lenId, 10), SUBSTACK: substackInput(rt2TwSetCh) }, {});
+      setParent(blocks, rt2TwSetCh, rt2TwRepeat);
+      setParent(blocks, rt2TwChgI, rt2TwRepeat);
+    }
+
+    // center: __font_x = __font_x - totalWidth/2
+    const rt2AdjCenter = uid();
+    { const xVar = uid(), twVar = uid(), div2 = uid(), sub = uid(); mk(blocks, xVar, "data_variable", {}, { VARIABLE: ["__font_x", varX] }); mk(blocks, twVar, "data_variable", {}, { VARIABLE: ["__font_totalWidth", varTotalWidth] }); setParent(blocks, twVar, div2); mk(blocks, div2, "operator_divide", { NUM1: blockInput(twVar), NUM2: numLit(2) }, {}); setParent(blocks, xVar, sub); setParent(blocks, div2, sub); mk(blocks, sub, "operator_subtract", { NUM1: blockInput(xVar), NUM2: blockInput(div2) }, {}); setParent(blocks, sub, rt2AdjCenter); mk(blocks, rt2AdjCenter, "data_setvariableto", { VALUE: blockInput(sub) }, { VARIABLE: ["__font_x", varX] }); }
+
+    // right: __font_x = __font_x - totalWidth
+    const rt2AdjRight = uid();
+    { const xVar = uid(), twVar = uid(), sub = uid(); mk(blocks, xVar, "data_variable", {}, { VARIABLE: ["__font_x", varX] }); mk(blocks, twVar, "data_variable", {}, { VARIABLE: ["__font_totalWidth", varTotalWidth] }); setParent(blocks, xVar, sub); setParent(blocks, twVar, sub); mk(blocks, sub, "operator_subtract", { NUM1: blockInput(xVar), NUM2: blockInput(twVar) }, {}); setParent(blocks, sub, rt2AdjRight); mk(blocks, rt2AdjRight, "data_setvariableto", { VALUE: blockInput(sub) }, { VARIABLE: ["__font_x", varX] }); }
+
+    // if align = "center" → center adjustment; else → right adjustment
+    const rt2AdjAlignVarC = uid(); mk(blocks, rt2AdjAlignVarC, "data_variable", {}, { VARIABLE: ["__font_align", varAlign] });
+    const rt2AdjAlignEqC = uid(); setParent(blocks, rt2AdjAlignVarC, rt2AdjAlignEqC); mk(blocks, rt2AdjAlignEqC, "operator_equals", { OPERAND1: blockInputStr(rt2AdjAlignVarC), OPERAND2: strLit("center") }, {});
+    const rt2AdjIfElse = uid();
+    setParent(blocks, rt2AdjAlignEqC, rt2AdjIfElse); setParent(blocks, rt2AdjCenter, rt2AdjIfElse); setParent(blocks, rt2AdjRight, rt2AdjIfElse);
+    mk(blocks, rt2AdjIfElse, "control_if_else", { CONDITION: boolInput(rt2AdjAlignEqC), SUBSTACK: substackInput(rt2AdjCenter), SUBSTACK2: substackInput(rt2AdjRight) }, {});
+
+    chain(blocks, [rt2TwInit, rt2TwInitI, rt2TwInitIT, rt2TwRepeat, rt2AdjIfElse]);
+
+    // guard: if NOT (__font_align = "left") { run pre-pass + adjust }
+    const rt2AlignVarL = uid(); mk(blocks, rt2AlignVarL, "data_variable", {}, { VARIABLE: ["__font_align", varAlign] });
+    const rt2AlignEqL = uid(); setParent(blocks, rt2AlignVarL, rt2AlignEqL); mk(blocks, rt2AlignEqL, "operator_equals", { OPERAND1: blockInputStr(rt2AlignVarL), OPERAND2: strLit("left") }, {});
+    const rt2AlignNotL = uid(); setParent(blocks, rt2AlignEqL, rt2AlignNotL); mk(blocks, rt2AlignNotL, "operator_not", { OPERAND: boolInput(rt2AlignEqL) }, {});
+    const rt2AlignIf = uid();
+    setParent(blocks, rt2AlignNotL, rt2AlignIf); setParent(blocks, rt2TwInit, rt2AlignIf);
+    mk(blocks, rt2AlignIf, "control_if", { CONDITION: boolInput(rt2AlignNotL), SUBSTACK: substackInput(rt2TwInit) }, {});
 
     // delete all per-character render queues
     const rt2DelX  = uid(); mk(blocks, rt2DelX,  "data_deletealloflist", {}, { LIST: ["__font_rq_x",      listRqX]      });
@@ -1297,6 +1402,7 @@ export function generateScratchProject(
 
     chain(blocks, [rt2DefId,
       rt2SetX, rt2SetY, rt2SetSize, rt2SetColor, rt2SetBright, rt2SetGhost, rt2SetLayer, rt2SetAlign, rt2SetLS,
+      rt2AlignIf,
       rt2DelX, rt2DelY, rt2DelSz, rt2DelCo, rt2DelGh, rt2DelBr,
       rt2ClearDT, rt2CallPp, rt2ClearId, rt2CallRtRender,
     ]);
