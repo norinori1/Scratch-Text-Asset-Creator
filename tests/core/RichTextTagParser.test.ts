@@ -4,6 +4,7 @@ import {
   serializeSegmentsToQueue,
   cssColorToScratchColorEffect,
   parseConsoleScript,
+  stripTags,
 } from "../../src/core/RichTextTagParser";
 import type { RtSegment } from "../../src/core/RichTextTagParser";
 
@@ -385,6 +386,80 @@ describe("parseConsoleScript", () => {
     expect(result[0].typeDelay).toBe(0);
     expect(result[0].letterSpacing).toBe(0);
     expect(result[0].layer).toBe(1);
+  });
+});
+
+describe("stripTags", () => {
+  it("returns plain text unchanged", () => {
+    expect(stripTags("Hello")).toBe("Hello");
+  });
+
+  it("strips a simple open/close tag pair", () => {
+    expect(stripTags("<c=100>赤</c>")).toBe("赤");
+  });
+
+  it("strips size tag", () => {
+    expect(stripTags("<s=200>大きい</s>")).toBe("大きい");
+  });
+
+  it("strips sp tag (typewriter speed)", () => {
+    expect(stripTags("<sp=80>ゆっくり</sp>")).toBe("ゆっくり");
+  });
+
+  it("strips wave/shake animation tags", () => {
+    expect(stripTags("<wave>ゆらゆら</wave>")).toBe("ゆらゆら");
+    expect(stripTags("<shake>ふるふる</shake>")).toBe("ふるふる");
+  });
+
+  it("strips tags but preserves surrounding plain text", () => {
+    expect(stripTags("前<c=100>緑</c>後")).toBe("前緑後");
+  });
+
+  it("strips multiple adjacent tags", () => {
+    expect(stripTags("<s=150>大</s><g=30>薄</g>")).toBe("大薄");
+  });
+
+  it("strips nested tags", () => {
+    expect(stripTags("<s=200><c=50>大カラー</c></s>")).toBe("大カラー");
+  });
+
+  it("converts <br> to newline", () => {
+    expect(stripTags("前<br>後")).toBe("前\n後");
+    expect(stripTags("A<br/>B")).toBe("A\nB");
+  });
+
+  it("returns empty string for empty input", () => {
+    expect(stripTags("")).toBe("");
+  });
+
+  it("handles text with no tags", () => {
+    expect(stripTags("abc 123")).toBe("abc 123");
+  });
+
+  it("strips tag-like markup even without a closing tag (malformed)", () => {
+    // A malformed tag like <c=100>赤 – the tag chars are skipped, content passes through
+    expect(stripTags("<c=100>赤")).toBe("赤");
+  });
+
+  it("does not include tag delimiters < or > in output", () => {
+    const result = stripTags("<c=100>test</c>");
+    expect(result).not.toContain("<");
+    expect(result).not.toContain(">");
+  });
+
+  it("preserves a stray '>' that appears outside any tag", () => {
+    // "2 > 1" contains no open tag, so ">" is a literal character
+    expect(stripTags("2 > 1")).toBe("2 > 1");
+  });
+
+  it("handles an unclosed '<' at end of string (partial tag)", () => {
+    // "<incomplete" — '<' opens a tag that never closes; the rest is skipped
+    expect(stripTags("<incomplete")).toBe("");
+  });
+
+  it("handles stray '>' brackets when not inside a tag", () => {
+    // Multiple stray ">" should all pass through as literal characters
+    expect(stripTags("a > b > c")).toBe("a > b > c");
   });
 });
 

@@ -35,6 +35,42 @@ export interface RtSegment {
 }
 
 /**
+ * リッチテキスト文字列からインラインタグを除去し、プレーンテキストを返す。
+ *
+ * タイプライター演出など、表示文字数のカウントや1文字ずつの処理が必要な
+ * 場面でタグ文字が含まれないよう前処理するために使用する。
+ *
+ * 例:
+ *   stripTags("<c=100>赤</c>テキスト") → "赤テキスト"
+ *   stripTags("前<br>後")             → "前\n後"
+ *   stripTags("<sp=80>ゆっくり</sp>") → "ゆっくり"
+ */
+export function stripTags(input: string): string {
+  // <br> を改行に変換（parseRichText と同様の前処理）
+  const preprocessed = input.replace(/<br\s*\/?>/gi, "\n");
+
+  // タグ文字を状態機械でスキャンして除去する。
+  // TypeScript 側で処理するため、<...> を単純に除去する。
+  // タグ外（inTag = false）に現れた ">" は通常のテキスト文字として保持する。
+  let result = "";
+  let inTag = false;
+  for (const ch of preprocessed) {
+    if (ch === "<") {
+      inTag = true;
+    } else if (ch === ">") {
+      if (!inTag) {
+        // タグ外の ">" はリテラル文字として出力する
+        result += ch;
+      }
+      inTag = false;
+    } else if (!inTag) {
+      result += ch;
+    }
+  }
+  return result;
+}
+
+/**
  * リッチテキスト文字列を RtSegment[] に分解する。
  * 不正タグはそのままプレーンテキストとして扱う（フォールバック）。
  *

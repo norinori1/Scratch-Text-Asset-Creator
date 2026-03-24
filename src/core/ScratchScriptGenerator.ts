@@ -2757,8 +2757,57 @@ export function generateScratchProject(
     mk(blocks, twChangeI, "data_changevariableby", { VALUE: numLit(1) },
       { VARIABLE: ["__font_i", varI] });
 
-    // link repeat body: setChar → ifBS → ifWait → changeI
-    chain(blocks, [twSetChar, twIfBS, twIfWait, twChangeI]);
+    // ── Tag-skipping wrapper ──────────────────────────────────────────────────
+    // Wrap the existing render+wait logic in an outer if/else that detects
+    // rich-text tag characters ("<" … ">") and skips them without rendering
+    // or waiting.  The state variable __pp_inTag (reused from the preprocess
+    // pipeline) tracks whether we are currently inside a tag.
+    //
+    // Pseudo-code:
+    //   if __pp_inTag = 1:
+    //     if __tw_char = ">": set __pp_inTag = 0   // closing ">"
+    //     // no render, no wait
+    //   else:
+    //     if __tw_char = "<": set __pp_inTag = 1   // opening "<"
+    //     else: (existing render + wait)            // normal character
+
+    // THEN branch (inTag=1): detect closing ">"
+    const twTagGtCond = uid(), twTagGtTrue = uid(), twTagGtIf = uid();
+    { const chVar = uid(); mk(blocks, chVar, "data_variable", {}, { VARIABLE: ["__tw_char", varTwChar] }); setParent(blocks, chVar, twTagGtCond); mk(blocks, twTagGtCond, "operator_equals", { OPERAND1: blockInputStr(chVar), OPERAND2: strLit(">") }, {}); }
+    mk(blocks, twTagGtTrue, "data_setvariableto", { VALUE: numLit(0) }, { VARIABLE: ["__pp_inTag", varPpInTag] });
+    setParent(blocks, twTagGtCond, twTagGtIf);
+    setParent(blocks, twTagGtTrue, twTagGtIf);
+    mk(blocks, twTagGtIf, "control_if", { CONDITION: boolInput(twTagGtCond), SUBSTACK: substackInput(twTagGtTrue) }, {});
+
+    // ELSE branch (inTag=0): detect opening "<" or do normal render+wait
+    const twTagLtCond = uid(), twTagLtTrue = uid(), twTagInnerIfElse = uid();
+    { const chVar = uid(); mk(blocks, chVar, "data_variable", {}, { VARIABLE: ["__tw_char", varTwChar] }); setParent(blocks, chVar, twTagLtCond); mk(blocks, twTagLtCond, "operator_equals", { OPERAND1: blockInputStr(chVar), OPERAND2: strLit("<") }, {}); }
+    mk(blocks, twTagLtTrue, "data_setvariableto", { VALUE: numLit(1) }, { VARIABLE: ["__pp_inTag", varPpInTag] });
+    setParent(blocks, twTagLtCond, twTagInnerIfElse);
+    setParent(blocks, twTagLtTrue, twTagInnerIfElse);
+    setParent(blocks, twIfBS, twTagInnerIfElse);  // first block of ELSE (normal char)
+    mk(blocks, twTagInnerIfElse, "control_if_else", {
+      CONDITION: boolInput(twTagLtCond),
+      SUBSTACK: substackInput(twTagLtTrue),
+      SUBSTACK2: substackInput(twIfBS),
+    }, {});
+
+    // Outer if/else: inTag=1 vs inTag=0
+    const twTagOuterCond = uid(), twTagOuter = uid();
+    { const inTagVar = uid(); mk(blocks, inTagVar, "data_variable", {}, { VARIABLE: ["__pp_inTag", varPpInTag] }); setParent(blocks, inTagVar, twTagOuterCond); mk(blocks, twTagOuterCond, "operator_equals", { OPERAND1: blockInput(inTagVar), OPERAND2: numLit(1) }, {}); }
+    setParent(blocks, twTagOuterCond, twTagOuter);
+    setParent(blocks, twTagGtIf, twTagOuter);
+    setParent(blocks, twTagInnerIfElse, twTagOuter);
+    mk(blocks, twTagOuter, "control_if_else", {
+      CONDITION: boolInput(twTagOuterCond),
+      SUBSTACK: substackInput(twTagGtIf),
+      SUBSTACK2: substackInput(twTagInnerIfElse),
+    }, {});
+
+    // link normal-char branch (inside ELSE of twTagInnerIfElse): ifBS → ifWait
+    chain(blocks, [twIfBS, twIfWait]);
+    // link main loop body: setChar → tag-aware outer → increment
+    chain(blocks, [twSetChar, twTagOuter, twChangeI]);
 
     mk(blocks, twRepeat, "control_repeat", {
       TIMES: blockInput(twLenDT, 10),
@@ -2771,6 +2820,11 @@ export function generateScratchProject(
     mk(blocks, twSetRunning0, "data_setvariableto", { VALUE: numLit(0) },
       { VARIABLE: ["__tw_running", varTwRunning] });
 
+    // Initialise tag-tracking state before the repeat loop
+    const twSetInTag0 = uid();
+    mk(blocks, twSetInTag0, "data_setvariableto", { VALUE: numLit(0) },
+      { VARIABLE: ["__pp_inTag", varPpInTag] });
+
     // link full definition body
     chain(blocks, [
       twDefId,
@@ -2779,7 +2833,7 @@ export function generateScratchProject(
       twSetSz, twSetCol, twSetBr, twSetGh,
       twSetCurX, twSetCurY,
       twApplySz, twApplyCol, twApplyBr, twApplyGh,
-      twSetI, twRepeat, twSetRunning0,
+      twSetI, twSetInTag0, twRepeat, twSetRunning0,
     ]);
 
     // When [space] key pressed: if __tw_running = 1 → set __tw_skip = 1
