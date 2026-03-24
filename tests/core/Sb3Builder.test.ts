@@ -304,4 +304,35 @@ describe("generateScratchProject", () => {
     // At minimum: 9 Font_Config lookups (x,y,size,color,brightness,ghost,layer,align,letterSpacing) + 1 alignment (center vs right)
     expect(ifElseBlocks.length).toBeGreaterThanOrEqual(10);
   });
+
+  it.each(["param", "richtext", "console"] as const)(
+    "no dangling variable references in generated blocks (%s mode)",
+    (mode) => {
+      const project = generateScratchProject([], [], "abc123", {
+        outputFormat: "svg",
+        warp: true,
+        renderMode: "clone",
+        align: "left",
+        letterSpacing: 0,
+        textInputMode: mode,
+      }) as {
+        targets: {
+          variables: Record<string, [string, unknown]>;
+          blocks: Record<string, { opcode: string; fields?: Record<string, [string, string]> }>;
+        }[];
+      };
+      const sprite = project.targets[1];
+      const stage = project.targets[0];
+      const allVarIds = new Set([
+        ...Object.keys(sprite.variables),
+        ...Object.keys(stage.variables),
+      ]);
+      for (const block of Object.values(sprite.blocks)) {
+        if (block.fields?.VARIABLE) {
+          const [name, id] = block.fields.VARIABLE;
+          expect(allVarIds.has(id), `block ${block.opcode} references undeclared variable "${name}" (${id}) in ${mode} mode`).toBe(true);
+        }
+      }
+    },
+  );
 });

@@ -58,11 +58,13 @@ export function stripTags(input: string): string {
     if (ch === "<") {
       inTag = true;
     } else if (ch === ">") {
-      if (!inTag) {
+      if (inTag) {
+        // タグの閉じ角括弧: タグモードを終了する
+        inTag = false;
+      } else {
         // タグ外の ">" はリテラル文字として出力する
         result += ch;
       }
-      inTag = false;
     } else if (!inTag) {
       result += ch;
     }

@@ -2760,8 +2760,9 @@ export function generateScratchProject(
     // ── Tag-skipping wrapper ──────────────────────────────────────────────────
     // Wrap the existing render+wait logic in an outer if/else that detects
     // rich-text tag characters ("<" … ">") and skips them without rendering
-    // or waiting.  The state variable __pp_inTag (reused from the preprocess
-    // pipeline) tracks whether we are currently inside a tag.
+    // or waiting.  __pp_inTag is a shared variable (always present in the
+    // project regardless of textInputMode) that tracks whether we are currently
+    // inside a tag.  It is reset to 0 before the repeat loop starts.
     //
     // Pseudo-code:
     //   if __pp_inTag = 1:
@@ -3405,10 +3406,12 @@ export function generateScratchProject(
     [varFmtFactor]: ["__fmt_factor", 1],
     [varFmtInt]: ["__fmt_int", 0],
     [varFmtMinStr]: ["__fmt_min_str", ""],
-    // Mode 2 (richtext) and Mode 3 (console): inline-tag parser variables
+    // __pp_inTag is used by the typewriter block (§17) in all modes to skip rich-text
+    // tag characters, so it must always be present regardless of textInputMode.
+    [varPpInTag]:    ["__pp_inTag",    0   ],
+    // Mode 2 (richtext) and Mode 3 (console): full inline-tag parser variables
     ...(textInputMode === "richtext" || textInputMode === "console" ? {
       [varPpI]:        ["__pp_i",        0   ],
-      [varPpInTag]:    ["__pp_inTag",    0   ],
       [varPpCh]:       ["__pp_ch",       ""  ],
       [varPpTagBuf]:   ["__pp_tagBuf",   ""  ],
       [varPpCurColor]: ["__pp_curColor", 0   ],
