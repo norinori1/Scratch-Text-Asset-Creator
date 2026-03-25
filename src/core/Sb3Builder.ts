@@ -14,6 +14,7 @@ export const DEFAULT_EXPORT_OPTIONS: ExportOptions = {
   align: "left",
   letterSpacing: 0,
   textInputMode: "param",
+  richTextEnabledByDefault: true,
 };
 
 export interface BuildProgress {

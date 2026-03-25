@@ -2,13 +2,14 @@ import { describe, it, expect } from "vitest";
 import { generateScratchProject } from "../../src/core/ScratchScriptGenerator";
 import type { ExportOptions } from "../../src/types";
 
-const defaultOptions: ExportOptions = {
-  outputFormat: "svg",
-  warp: true,
-  renderMode: "clone",
-  align: "left",
-  letterSpacing: 0,
-};
+  const defaultOptions: ExportOptions = {
+    outputFormat: "svg",
+    warp: true,
+    renderMode: "clone",
+    align: "left",
+    letterSpacing: 0,
+    richTextEnabledByDefault: true,
+  };
 
 describe("generateScratchProject", () => {
   it("produces a project with two targets", () => {
@@ -252,7 +253,7 @@ describe("generateScratchProject", () => {
     expect(stage.isStage).toBe(true);
     const fontConfig = Object.values(stage.lists).find(([name]) => name === "Font_Config");
     expect(fontConfig).toBeDefined();
-    expect(fontConfig![1]).toHaveLength(9);
+    expect(fontConfig![1]).toHaveLength(10);
   });
 
   it("Font_Config has correct default values from options", () => {
@@ -267,6 +268,7 @@ describe("generateScratchProject", () => {
     // index 8 (0-based: 7) = align, index 9 (0-based: 8) = letterSpacing
     expect(data[7]).toBe("right");   // Font_Config[8] = align
     expect(data[8]).toBe(3);          // Font_Config[9] = letterSpacing
+    expect(data[9]).toBe(1);          // Font_Config[10] = richTextEnabled
     expect(data[2]).toBe(100);        // Font_Config[3] = size default
   });
 

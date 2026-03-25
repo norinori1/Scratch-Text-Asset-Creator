@@ -31,6 +31,8 @@ export interface RtSegment {
   brightness?: number;   // -100〜100
   wave?: boolean;
   shake?: boolean;
+  animAmp?: number;
+  animSpd?: number;
   typeDelay?: number;    // ms/文字
 }
 
@@ -49,7 +51,7 @@ export function parseRichText(input: string): RtSegment[] {
   const preprocessed = input.replace(/<br\s*\/?>/gi, "\n");
 
   const segments: RtSegment[] = [];
-  const tagRegex = /<(\w+)(?:=([^>]*))?>(.*?)<\/\1>/gs;
+  const tagRegex = /<(\w+)\s*(?:=\s*([^>]*))?\s*>(.*?)<\/\1>/gs;
   let lastIndex = 0;
 
   for (const match of preprocessed.matchAll(tagRegex)) {
@@ -79,15 +81,16 @@ export function parseRichText(input: string): RtSegment[] {
 }
 
 function applyTag(seg: RtSegment, tag: string, value?: string): RtSegment {
+  const normalizedValue = value?.trim();
   switch (tag) {
-    case "c":    return { ...seg, colorEffect: Number(value) };
-    case "ch":   return { ...seg, colorEffect: value ? cssColorToScratchColorEffect(value) : 0 };
-    case "s":    return { ...seg, size: Number(value) };
-    case "g":    return { ...seg, ghost: Number(value) };
-    case "b":    return { ...seg, brightness: Number(value) };
+    case "c":    return { ...seg, colorEffect: Number(normalizedValue) };
+    case "ch":   return { ...seg, colorEffect: normalizedValue ? cssColorToScratchColorEffect(normalizedValue) : 0 };
+    case "s":    return { ...seg, size: Number(normalizedValue) };
+    case "g":    return { ...seg, ghost: Number(normalizedValue) };
+    case "b":    return { ...seg, brightness: Number(normalizedValue) };
     case "wave": return { ...seg, wave: true };
     case "shake": return { ...seg, shake: true };
-    case "sp":   return { ...seg, typeDelay: Number(value) };
+    case "sp":   return { ...seg, typeDelay: Number(normalizedValue) };
     default:     return seg; // 未知タグは無視
   }
 }
@@ -163,8 +166,8 @@ export function serializeSegmentsToQueue(
       const ghost = seg.ghost ?? 0;
       const brightness = seg.brightness ?? 0;
       const animType = seg.wave ? "wave" : seg.shake ? "shake" : "";
-      const animAmp = 0;
-      const animSpd = 0;
+      const animAmp = seg.animAmp ?? 0;
+      const animSpd = seg.animSpd ?? 0;
       const typeDelay = seg.typeDelay ?? 0;
 
       if (ch === "\n") {
@@ -303,4 +306,3 @@ function applyConsoleKey(block: ConsoleBlock, key: string, val: string): void {
     // 未知キーは無視
   }
 }
-

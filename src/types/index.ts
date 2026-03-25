@@ -54,6 +54,8 @@ export interface ExportOptions {
   letterSpacing: number;
   /** テキスト入力モード (§15): param = 10引数, richtext = インラインタグ, console = コンソールスクリプト */
   textInputMode?: TextInputMode;
+  /** リッチテキストタグ解釈のデフォルト有効状態（true で有効） */
+  richTextEnabledByDefault?: boolean;
 }
 
 export interface GlyphAsset {

@@ -267,12 +267,13 @@ export function generateScratchProject(
   costumes: ScratchCostume[],
   glyphInfos: GlyphInfo[],
   backdropAssetId: string,
-  options: ExportOptions = { outputFormat: "svg", warp: true, renderMode: "clone", align: "left", letterSpacing: 0, textInputMode: "param" },
+  options: ExportOptions = { outputFormat: "svg", warp: true, renderMode: "clone", align: "left", letterSpacing: 0, textInputMode: "param", richTextEnabledByDefault: true },
   lineHeight = 72
 ): object {
   const isPen = options.renderMode === "pen";
   const warpStr = options.warp ? "true" : "false";
   const textInputMode = options.textInputMode ?? "param";
+  const richTextEnabledByDefault = options.richTextEnabledByDefault ?? true;
 
   // IDs for Stage variables/broadcasts
   const varDisplayText = uid();
@@ -296,6 +297,7 @@ export function generateScratchProject(
   const varBrightness = uid();
   const varGhost = uid();
   const varLayer = uid();
+  const varRichTextEnabled = uid();
   const varLetterSpacing = uid();
   const varLineHeight = uid();
   const varAlign = uid();
@@ -305,6 +307,7 @@ export function generateScratchProject(
   const varTwRunning = uid();  // __tw_running
   const varTwSkip = uid();     // __tw_skip
   const varTwChar = uid();     // __tw_char
+  const varTwDelay = uid();    // __tw_delay
   // Number format variables (§18)
   const varFmtResult = uid();  // __fmt_result
   const varFmtStr = uid();     // __fmt_str
@@ -328,10 +331,12 @@ export function generateScratchProject(
   // Mode 2 (richtext): per-character render-queue lists
   const listRqX = uid(), listRqY = uid(), listRqSize = uid();
   const listRqColor = uid(), listRqGhost = uid(), listRqBright = uid();
+  const listRqDelay = uid();
   // Mode 3 (console): console-script parsing variables (__con_*)
   const varConI = uid(), varConLine = uid(), varConColPos = uid();
   const varConJ = uid(), varConKey = uid(), varConVal = uid();
   const varConRawText = uid(); // raw text with tags, used before preprocess
+  const varConRichText = uid();
   // Mode 3 list
   const listConsole = uid();
   // Shared argument IDs for __font_preprocess / __font_pp_apply_tag (Mode 2 and Mode 3)
@@ -344,8 +349,8 @@ export function generateScratchProject(
     charMapData.push(g.char, g.advanceWidth);
   }
 
-  // Font_Config default values (index 1..9):
-  // 1=x, 2=y, 3=size, 4=color, 5=brightness, 6=ghost, 7=layer, 8=align, 9=letterSpacing
+  // Font_Config default values (index 1..10):
+  // 1=x, 2=y, 3=size, 4=color, 5=brightness, 6=ghost, 7=layer, 8=align, 9=letterSpacing, 10=richTextEnabled
   const fontConfigData: (string | number)[] = [
     0,                               // [1] x default
     0,                               // [2] y default
@@ -356,6 +361,7 @@ export function generateScratchProject(
     1,                               // [7] layer default
     options.align ?? "left",         // [8] align default
     options.letterSpacing ?? 0,      // [9] letterSpacing default
+    richTextEnabledByDefault ? 1 : 0, // [10] richTextEnabled default (1=true / 0=false)
   ];
 
   // Instruction list contents (Japanese user manual)
@@ -370,6 +376,7 @@ export function generateScratchProject(
     "Font_Config[7]: レイヤー のデフォルト値 (1=前面 / -1=背面)",
     "Font_Config[8]: 揃え のデフォルト値 (left/center/right)",
     "Font_Config[9]: 文字間隔 のデフォルト値 (px)",
+    "Font_Config[10]: リッチテキスト有効 (1=有効 / 0=無効)",
     "=== テキストを表示する の使い方 ===",
     "パラメーターを空にするとFont_Configの値が使われます",
     "揃え: left(左)/center(中央)/right(右)",
@@ -1212,23 +1219,26 @@ export function generateScratchProject(
     // テキストを表示する (text) x:(x) y:(y) 揃え:(align)  — warp  [Mode 2 only]
     // ═══════════════════════════════════════════════════════════════════════════
     if (textInputMode === "richtext") {
-    const procCode2 = "テキストを表示する %s x: %s y: %s 揃え: %s";
-    const rt2TextId = uid(), rt2XId = uid(), rt2YId = uid(), rt2AlignId = uid();
+    const procCode2 = "テキストを表示する %s x: %s y: %s 揃え: %s リッチテキスト: %b";
+    const rt2TextId = uid(), rt2XId = uid(), rt2YId = uid(), rt2AlignId = uid(), rt2RtEnId = uid();
     const rt2ProtoId = uid(), rt2DefId = uid();
     const rt2TextShadow = mAR("text", true), rt2XShadow = mAR("x", true), rt2YShadow = mAR("y", true), rt2AlignShadow = mAR("align", true);
+    const rt2RtEnShadow = uid();
+    mk(blocks, rt2RtEnShadow, "argument_reporter_boolean", {}, { VALUE: ["enableRichText", null] }, false, true);
     setParent(blocks, rt2TextShadow, rt2ProtoId);
     setParent(blocks, rt2XShadow, rt2ProtoId);
     setParent(blocks, rt2YShadow, rt2ProtoId);
     setParent(blocks, rt2AlignShadow, rt2ProtoId);
+    setParent(blocks, rt2RtEnShadow, rt2ProtoId);
     mk(blocks, rt2ProtoId, "procedures_prototype",
-      { [rt2TextId]: [1, rt2TextShadow], [rt2XId]: [1, rt2XShadow], [rt2YId]: [1, rt2YShadow], [rt2AlignId]: [1, rt2AlignShadow] },
+      { [rt2TextId]: [1, rt2TextShadow], [rt2XId]: [1, rt2XShadow], [rt2YId]: [1, rt2YShadow], [rt2AlignId]: [1, rt2AlignShadow], [rt2RtEnId]: [2, rt2RtEnShadow] },
       {}, false, true, undefined,
       {
         tagName: "mutation", children: [],
         proccode: procCode2,
-        argumentids: JSON.stringify([rt2TextId, rt2XId, rt2YId, rt2AlignId]),
-        argumentnames: JSON.stringify(["text", "x", "y", "align"]),
-        argumentdefaults: JSON.stringify(["", "", "", ""]),
+        argumentids: JSON.stringify([rt2TextId, rt2XId, rt2YId, rt2AlignId, rt2RtEnId]),
+        argumentnames: JSON.stringify(["text", "x", "y", "align", "enableRichText"]),
+        argumentdefaults: JSON.stringify(["", "", "", "", richTextEnabledByDefault]),
         warp: warpStr,
       });
     setParent(blocks, rt2ProtoId, rt2DefId);
@@ -1244,6 +1254,12 @@ export function generateScratchProject(
     const rt2SetLayer  = buildFontConfigSet(varLayer,           "__font_layer",         7);
     const rt2SetAlign  = buildFontConfigLookup(varAlign,        "__font_align",         "align", 8, true);
     const rt2SetLS     = buildFontConfigSet(varLetterSpacing,   "__font_letterSpacing", 9);
+    const rt2SetRtEn   = buildFontConfigSet(varRichTextEnabled, "__font_richTextEnabled", 10);
+    const rt2ArgRtEn   = uid();
+    mk(blocks, rt2ArgRtEn, "argument_reporter_boolean", {}, { VALUE: ["enableRichText", null] });
+    const rt2SetRtEnArg = uid();
+    setParent(blocks, rt2ArgRtEn, rt2SetRtEnArg);
+    mk(blocks, rt2SetRtEnArg, "data_setvariableto", { VALUE: blockInput(rt2ArgRtEn) }, { VARIABLE: ["__font_richTextEnabled", varRichTextEnabled] });
 
     // ── Alignment pre-pass: scan raw text, skip tag chars, accumulate totalWidth ──
     // Only runs when align ≠ "left". Reuses __pp_* vars (preprocess reinitialises them).
@@ -1349,6 +1365,9 @@ export function generateScratchProject(
     setParent(blocks, rt2AlignNotL, rt2AlignIf); setParent(blocks, rt2TwInit, rt2AlignIf);
     mk(blocks, rt2AlignIf, "control_if", { CONDITION: boolInput(rt2AlignNotL), SUBSTACK: substackInput(rt2TwInit) }, {});
 
+    const rt2RtEnVar = uid(); mk(blocks, rt2RtEnVar, "data_variable", {}, { VARIABLE: ["__font_richTextEnabled", varRichTextEnabled] });
+    const rt2RtEnEq = uid(); setParent(blocks, rt2RtEnVar, rt2RtEnEq); mk(blocks, rt2RtEnEq, "operator_equals", { OPERAND1: blockInput(rt2RtEnVar), OPERAND2: numLit(1) }, {});
+
     // delete all per-character render queues
     const rt2DelX  = uid(); mk(blocks, rt2DelX,  "data_deletealloflist", {}, { LIST: ["__font_rq_x",      listRqX]      });
     const rt2DelY  = uid(); mk(blocks, rt2DelY,  "data_deletealloflist", {}, { LIST: ["__font_rq_y",      listRqY]      });
@@ -1356,6 +1375,7 @@ export function generateScratchProject(
     const rt2DelCo = uid(); mk(blocks, rt2DelCo, "data_deletealloflist", {}, { LIST: ["__font_rq_color",  listRqColor]  });
     const rt2DelGh = uid(); mk(blocks, rt2DelGh, "data_deletealloflist", {}, { LIST: ["__font_rq_ghost",  listRqGhost]  });
     const rt2DelBr = uid(); mk(blocks, rt2DelBr, "data_deletealloflist", {}, { LIST: ["__font_rq_bright", listRqBright] });
+    const rt2DelDl = uid(); mk(blocks, rt2DelDl, "data_deletealloflist", {}, { LIST: ["__font_rq_delay",  listRqDelay]  });
 
     // set __font_displayText = ""
     const rt2ClearDT = uid();
@@ -1403,11 +1423,51 @@ export function generateScratchProject(
       warp: "true",
     });
 
+    const rt2CallDoRender = uid();
+    mk(blocks, rt2CallDoRender, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation",
+      children: [],
+      proccode: doRenderProcCode,
+      argumentids: JSON.stringify([]),
+      warp: "true",
+    });
+    const rt2SetDTFromArg = uid(), rt2ArgTextVal = mAR("text");
+    setParent(blocks, rt2ArgTextVal, rt2SetDTFromArg);
+    mk(blocks, rt2SetDTFromArg, "data_setvariableto", { VALUE: blockInputStr(rt2ArgTextVal) }, { VARIABLE: ["__font_displayText", varDisplayText] });
+
+    chain(blocks, [rt2AlignIf, rt2DelX, rt2DelY, rt2DelSz, rt2DelCo, rt2DelGh, rt2DelBr, rt2DelDl, rt2ClearDT, rt2CallPp, rt2ClearId, rt2CallRtRender]);
+    let rt2ClearPlainId: string;
+    if (isPen) {
+      const bCallClearPlain = uid();
+      mk(blocks, bCallClearPlain, "procedures_call", {}, {}, false, false, undefined, {
+        tagName: "mutation", children: [],
+        proccode: "テキストをすべてクリアする",
+        argumentids: JSON.stringify([]),
+        warp: warpStr,
+      });
+      rt2ClearPlainId = bCallClearPlain;
+    } else {
+      const bBcClearPlain = uid(), bcClearMenuPlain = uid();
+      mk(blocks, bcClearMenuPlain, "event_broadcast_menu", {},
+        { BROADCAST_OPTION: ["__font_clear", broadcastClear] }, false, true);
+      setParent(blocks, bcClearMenuPlain, bBcClearPlain);
+      mk(blocks, bBcClearPlain, "event_broadcast", { BROADCAST_INPUT: [1, bcClearMenuPlain] }, {});
+      rt2ClearPlainId = bBcClearPlain;
+    }
+    chain(blocks, [rt2SetDTFromArg, rt2ClearPlainId, rt2CallDoRender]);
+    const rt2IfRtEnabled = uid();
+    setParent(blocks, rt2RtEnEq, rt2IfRtEnabled);
+    setParent(blocks, rt2AlignIf, rt2IfRtEnabled);
+    setParent(blocks, rt2SetDTFromArg, rt2IfRtEnabled);
+    mk(blocks, rt2IfRtEnabled, "control_if_else", {
+      CONDITION: boolInput(rt2RtEnEq),
+      SUBSTACK: substackInput(rt2AlignIf),
+      SUBSTACK2: substackInput(rt2SetDTFromArg),
+    }, {});
+
     chain(blocks, [rt2DefId,
-      rt2SetX, rt2SetY, rt2SetSize, rt2SetColor, rt2SetBright, rt2SetGhost, rt2SetLayer, rt2SetAlign, rt2SetLS,
-      rt2AlignIf,
-      rt2DelX, rt2DelY, rt2DelSz, rt2DelCo, rt2DelGh, rt2DelBr,
-      rt2ClearDT, rt2CallPp, rt2ClearId, rt2CallRtRender,
+      rt2SetX, rt2SetY, rt2SetSize, rt2SetColor, rt2SetBright, rt2SetGhost, rt2SetLayer, rt2SetAlign, rt2SetLS, rt2SetRtEn, rt2SetRtEnArg,
+      rt2IfRtEnabled,
     ]);
     } // end if (textInputMode === "richtext") — Mode 2 main block
 
@@ -1621,7 +1681,7 @@ export function generateScratchProject(
     const ppResetInTag  = uid(); mk(blocks, ppResetInTag,  "data_setvariableto", { VALUE: numLit(0) },  { VARIABLE: ["__pp_inTag",  varPpInTag]  });
     chain(blocks, [ppCallApply, ppResetTagBuf, ppResetInTag]);
 
-    // else: append __pp_ch to __pp_tagBuf
+    // else: append __pp_ch to __pp_tagBuf (tag内スペースは無視して正規化)
     const ppAppendTagBuf = uid();
     {
       const tbVar = uid(), chVar = uid(), joinId = uid();
@@ -1632,13 +1692,21 @@ export function generateScratchProject(
       setParent(blocks, joinId, ppAppendTagBuf);
       mk(blocks, ppAppendTagBuf, "data_setvariableto", { VALUE: blockInputStr(joinId) }, { VARIABLE: ["__pp_tagBuf", varPpTagBuf] });
     }
+    const ppSpaceCond = uid();
+    { const chVar = uid(); mk(blocks, chVar, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] }); setParent(blocks, chVar, ppSpaceCond); mk(blocks, ppSpaceCond, "operator_equals", { OPERAND1: blockInputStr(chVar), OPERAND2: strLit(" ") }, {}); }
+    const ppNotSpaceCond = uid();
+    setParent(blocks, ppSpaceCond, ppNotSpaceCond);
+    mk(blocks, ppNotSpaceCond, "operator_not", { OPERAND: boolInput(ppSpaceCond) }, {});
+    const ppIfNotSpace = uid();
+    setParent(blocks, ppNotSpaceCond, ppIfNotSpace); setParent(blocks, ppAppendTagBuf, ppIfNotSpace);
+    mk(blocks, ppIfNotSpace, "control_if", { CONDITION: boolInput(ppNotSpaceCond), SUBSTACK: substackInput(ppAppendTagBuf) }, {});
 
     // inner if/else: ch = ">"
     const ppGtCond = uid();
     { const chVar = uid(); mk(blocks, chVar, "data_variable", {}, { VARIABLE: ["__pp_ch", varPpCh] }); setParent(blocks, chVar, ppGtCond); mk(blocks, ppGtCond, "operator_equals", { OPERAND1: blockInputStr(chVar), OPERAND2: strLit(">") }, {}); }
     const ppInnerGt = uid();
-    setParent(blocks, ppGtCond, ppInnerGt); setParent(blocks, ppCallApply, ppInnerGt); setParent(blocks, ppAppendTagBuf, ppInnerGt);
-    mk(blocks, ppInnerGt, "control_if_else", { CONDITION: boolInput(ppGtCond), SUBSTACK: substackInput(ppCallApply), SUBSTACK2: substackInput(ppAppendTagBuf) }, {});
+    setParent(blocks, ppGtCond, ppInnerGt); setParent(blocks, ppCallApply, ppInnerGt); setParent(blocks, ppIfNotSpace, ppInnerGt);
+    mk(blocks, ppInnerGt, "control_if_else", { CONDITION: boolInput(ppGtCond), SUBSTACK: substackInput(ppCallApply), SUBSTACK2: substackInput(ppIfNotSpace) }, {});
 
     // ── ELSE branch (inTag=0): ch="<" → open tag; else → process character ──
     // open tag
@@ -1677,12 +1745,13 @@ export function generateScratchProject(
     const ppAddCo = uid(); { const v = uid(); mk(blocks, v, "data_variable", {}, { VARIABLE: ["__pp_curColor",  varPpCurColor]}); setParent(blocks, v, ppAddCo); mk(blocks, ppAddCo, "data_addtolist", { ITEM: blockInput(v) }, { LIST: ["__font_rq_color",  listRqColor] }); }
     const ppAddGh = uid(); { const v = uid(); mk(blocks, v, "data_variable", {}, { VARIABLE: ["__pp_curGhost",  varPpCurGhost]}); setParent(blocks, v, ppAddGh); mk(blocks, ppAddGh, "data_addtolist", { ITEM: blockInput(v) }, { LIST: ["__font_rq_ghost",  listRqGhost] }); }
     const ppAddBr = uid(); { const v = uid(); mk(blocks, v, "data_variable", {}, { VARIABLE: ["__pp_curBright", varPpCurBright]}); setParent(blocks, v, ppAddBr); mk(blocks, ppAddBr, "data_addtolist", { ITEM: blockInput(v) }, { LIST: ["__font_rq_bright", listRqBright]}); }
+    const ppAddDl = uid(); { const v = uid(); mk(blocks, v, "data_variable", {}, { VARIABLE: ["__pp_curDelay",  varPpCurDelay] }); setParent(blocks, v, ppAddDl); mk(blocks, ppAddDl, "data_addtolist", { ITEM: blockInput(v) }, { LIST: ["__font_rq_delay",  listRqDelay] }); }
 
     // change __pp_curX by (bsearch_result + letterSpacing)
     const ppAdvX = uid();
     { const bsVar = uid(), lsVar = uid(), addId = uid(); mk(blocks, bsVar, "data_variable", {}, { VARIABLE: ["__font_bsearch_result", varBsResult] }); mk(blocks, lsVar, "data_variable", {}, { VARIABLE: ["__font_letterSpacing", varLetterSpacing] }); setParent(blocks, bsVar, addId); setParent(blocks, lsVar, addId); mk(blocks, addId, "operator_add", { NUM1: blockInput(bsVar), NUM2: blockInput(lsVar) }, {}); setParent(blocks, addId, ppAdvX); mk(blocks, ppAdvX, "data_changevariableby", { VALUE: blockInput(addId) }, { VARIABLE: ["__pp_curX", varPpCurX] }); }
 
-    chain(blocks, [ppAppDT, ppAddX, ppAddY, ppAddSz, ppAddCo, ppAddGh, ppAddBr, ppAdvX]);
+    chain(blocks, [ppAppDT, ppAddX, ppAddY, ppAddSz, ppAddCo, ppAddGh, ppAddBr, ppAddDl, ppAdvX]);
 
     const ppIfBsRes = uid();
     setParent(blocks, ppBsResNot, ppIfBsRes); setParent(blocks, ppAppDT, ppIfBsRes);
@@ -1871,6 +1940,7 @@ export function generateScratchProject(
     const conInitLayer  = buildFontConfigSet(varLayer,       "__font_layer",         7);
     const conInitAlign  = buildFontConfigSet(varAlign,       "__font_align",         8, true);
     const conInitLS     = buildFontConfigSet(varLetterSpacing, "__font_letterSpacing", 9);
+    const conInitRt     = buildFontConfigSet(varConRichText, "__con_richText", 10);
     const conInitX      = buildFontConfigSet(varX,           "__font_x",             1);
     const conInitY      = buildFontConfigSet(varY,           "__font_y",             2);
     const conInitDT = uid();
@@ -1945,6 +2015,7 @@ export function generateScratchProject(
     const conFlushDelCo = uid(); mk(blocks, conFlushDelCo, "data_deletealloflist", {}, { LIST: ["__font_rq_color",  listRqColor]  });
     const conFlushDelGh = uid(); mk(blocks, conFlushDelGh, "data_deletealloflist", {}, { LIST: ["__font_rq_ghost",  listRqGhost]  });
     const conFlushDelBr = uid(); mk(blocks, conFlushDelBr, "data_deletealloflist", {}, { LIST: ["__font_rq_bright", listRqBright] });
+    const conFlushDelDl = uid(); mk(blocks, conFlushDelDl, "data_deletealloflist", {}, { LIST: ["__font_rq_delay",  listRqDelay]  });
     const conFlushClearDT = uid();
     mk(blocks, conFlushClearDT, "data_setvariableto", { VALUE: strLit("") },
       { VARIABLE: ["__font_displayText", varDisplayText] });
@@ -1969,6 +2040,34 @@ export function generateScratchProject(
       argumentids: JSON.stringify([]),
       warp: "true",
     });
+    const conFlushCallDoRender = uid();
+    mk(blocks, conFlushCallDoRender, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation", children: [],
+      proccode: doRenderProcCode,
+      argumentids: JSON.stringify([]),
+      warp: "true",
+    });
+    const conFlushSetDT = uid();
+    const conFlushRawVarPlain = uid();
+    mk(blocks, conFlushRawVarPlain, "data_variable", {}, { VARIABLE: ["__con_rawText", varConRawText] });
+    setParent(blocks, conFlushRawVarPlain, conFlushSetDT);
+    mk(blocks, conFlushSetDT, "data_setvariableto", { VALUE: blockInputStr(conFlushRawVarPlain) }, { VARIABLE: ["__font_displayText", varDisplayText] });
+    const conFlushRtVar = uid();
+    mk(blocks, conFlushRtVar, "data_variable", {}, { VARIABLE: ["__con_richText", varConRichText] });
+    const conFlushRtEq = uid();
+    setParent(blocks, conFlushRtVar, conFlushRtEq);
+    mk(blocks, conFlushRtEq, "operator_equals", { OPERAND1: blockInput(conFlushRtVar), OPERAND2: numLit(1) }, {});
+    const conFlushIfRt = uid();
+    chain(blocks, [conFlushClearDT, conFlushCallPp, conCallRenderFlush]);
+    chain(blocks, [conFlushSetDT, conFlushCallDoRender]);
+    setParent(blocks, conFlushRtEq, conFlushIfRt);
+    setParent(blocks, conFlushClearDT, conFlushIfRt);
+    setParent(blocks, conFlushSetDT, conFlushIfRt);
+    mk(blocks, conFlushIfRt, "control_if_else", {
+      CONDITION: boolInput(conFlushRtEq),
+      SUBSTACK: substackInput(conFlushClearDT),
+      SUBSTACK2: substackInput(conFlushSetDT),
+    }, {});
 
     // reset __con_rawText + state vars after flush
     const conResetDT = uid();
@@ -1981,11 +2080,12 @@ export function generateScratchProject(
     const conResetLayer  = buildFontConfigSet(varLayer,        "__font_layer",          7);
     const conResetAlign  = buildFontConfigSet(varAlign,        "__font_align",          8, true);
     const conResetLS     = buildFontConfigSet(varLetterSpacing, "__font_letterSpacing", 9);
+    const conResetRt     = buildFontConfigSet(varConRichText,   "__con_richText",       10);
     const conResetX      = buildFontConfigSet(varX,            "__font_x",              1);
     const conResetY      = buildFontConfigSet(varY,            "__font_y",              2);
-    chain(blocks, [conFlushDelX, conFlushDelY, conFlushDelSz, conFlushDelCo, conFlushDelGh, conFlushDelBr,
-      conFlushClearDT, conFlushCallPp, conCallRenderFlush, conResetDT, conResetSize, conResetColor, conResetBright,
-      conResetGhost, conResetLayer, conResetAlign, conResetLS, conResetX, conResetY]);
+    chain(blocks, [conFlushDelX, conFlushDelY, conFlushDelSz, conFlushDelCo, conFlushDelGh, conFlushDelBr, conFlushDelDl,
+      conFlushIfRt, conResetDT, conResetSize, conResetColor, conResetBright,
+      conResetGhost, conResetLayer, conResetAlign, conResetLS, conResetRt, conResetX, conResetY]);
 
     const conIfHasDT = uid();
     setParent(blocks, conNotDTEmp, conIfHasDT);
@@ -2179,7 +2279,8 @@ export function generateScratchProject(
     const dAlign  = buildKeyDispatch(varAlign,          "__font_align",         "align",         true);
     const dLS     = buildKeyDispatch(varLetterSpacing,  "__font_letterSpacing", "letterSpacing");
     const dLayer  = buildKeyDispatch(varLayer,          "__font_layer",         "layer");
-    chain(blocks, [dText, dX, dY, dSize, dColor, dGhost, dBright, dAlign, dLS, dLayer]);
+    const dRt     = buildKeyDispatch(varConRichText,    "__con_richText",       "richText");
+    chain(blocks, [dText, dX, dY, dSize, dColor, dGhost, dBright, dAlign, dLS, dLayer, dRt]);
 
     // if colPos != 0: run key/val extraction + dispatch
     const conColPosVarNZ = uid(), conColPosEqNZ = uid(), conNotColEqZ = uid();
@@ -2245,6 +2346,7 @@ export function generateScratchProject(
     const conFinalDelCo = uid(); mk(blocks, conFinalDelCo, "data_deletealloflist", {}, { LIST: ["__font_rq_color",  listRqColor]  });
     const conFinalDelGh = uid(); mk(blocks, conFinalDelGh, "data_deletealloflist", {}, { LIST: ["__font_rq_ghost",  listRqGhost]  });
     const conFinalDelBr = uid(); mk(blocks, conFinalDelBr, "data_deletealloflist", {}, { LIST: ["__font_rq_bright", listRqBright] });
+    const conFinalDelDl = uid(); mk(blocks, conFinalDelDl, "data_deletealloflist", {}, { LIST: ["__font_rq_delay",  listRqDelay]  });
     const conFinalClearDT = uid();
     mk(blocks, conFinalClearDT, "data_setvariableto", { VALUE: strLit("") },
       { VARIABLE: ["__font_displayText", varDisplayText] });
@@ -2267,8 +2369,35 @@ export function generateScratchProject(
       argumentids: JSON.stringify([]),
       warp: "true",
     });
-    chain(blocks, [conFinalDelX, conFinalDelY, conFinalDelSz, conFinalDelCo, conFinalDelGh, conFinalDelBr,
-      conFinalClearDT, conFinalCallPp, conFinalRender]);
+    const conFinalCallDoRender = uid();
+    mk(blocks, conFinalCallDoRender, "procedures_call", {}, {}, false, false, undefined, {
+      tagName: "mutation", children: [],
+      proccode: doRenderProcCode,
+      argumentids: JSON.stringify([]),
+      warp: "true",
+    });
+    const conFinalSetDT = uid();
+    const conFinalRawVarPlain = uid();
+    mk(blocks, conFinalRawVarPlain, "data_variable", {}, { VARIABLE: ["__con_rawText", varConRawText] });
+    setParent(blocks, conFinalRawVarPlain, conFinalSetDT);
+    mk(blocks, conFinalSetDT, "data_setvariableto", { VALUE: blockInputStr(conFinalRawVarPlain) }, { VARIABLE: ["__font_displayText", varDisplayText] });
+    const conFinalRtVar = uid();
+    mk(blocks, conFinalRtVar, "data_variable", {}, { VARIABLE: ["__con_richText", varConRichText] });
+    const conFinalRtEq = uid();
+    setParent(blocks, conFinalRtVar, conFinalRtEq);
+    mk(blocks, conFinalRtEq, "operator_equals", { OPERAND1: blockInput(conFinalRtVar), OPERAND2: numLit(1) }, {});
+    const conFinalIfRt = uid();
+    chain(blocks, [conFinalClearDT, conFinalCallPp, conFinalRender]);
+    chain(blocks, [conFinalSetDT, conFinalCallDoRender]);
+    setParent(blocks, conFinalRtEq, conFinalIfRt);
+    setParent(blocks, conFinalClearDT, conFinalIfRt);
+    setParent(blocks, conFinalSetDT, conFinalIfRt);
+    mk(blocks, conFinalIfRt, "control_if_else", {
+      CONDITION: boolInput(conFinalRtEq),
+      SUBSTACK: substackInput(conFinalClearDT),
+      SUBSTACK2: substackInput(conFinalSetDT),
+    }, {});
+    chain(blocks, [conFinalDelX, conFinalDelY, conFinalDelSz, conFinalDelCo, conFinalDelGh, conFinalDelBr, conFinalDelDl, conFinalIfRt]);
     const conFinalIf = uid();
     setParent(blocks, conFinalNotEq, conFinalIf);
     setParent(blocks, conFinalDelX, conFinalIf);
@@ -2276,7 +2405,7 @@ export function generateScratchProject(
       { CONDITION: boolInput(conFinalNotEq), SUBSTACK: substackInput(conFinalDelX) }, {});
 
     chain(blocks, [conDefId, conClearId, conInitSize, conInitColor, conInitBright, conInitGhost,
-      conInitLayer, conInitAlign, conInitLS, conInitX, conInitY, conInitDT, conSetI,
+      conInitLayer, conInitAlign, conInitLS, conInitRt, conInitX, conInitY, conInitDT, conSetI,
       conOuterRepeat, conFinalIf]);
   } // end if (textInputMode === "console")
 
@@ -2359,13 +2488,15 @@ export function generateScratchProject(
     setParent(blocks, twProtoId, twDefId);
     mk(blocks, twDefId, "procedures_definition", { custom_block: [1, twProtoId] }, {}, true, false, [800, 700]);
 
-    // 1. set __font_displayText = text arg
+    // 1. set __font_displayText = text arg (plain mode fallback)
     const twSetDT = uid(), twArgDTVal = uid();
     mk(blocks, twArgDTVal, "argument_reporter_string_number", {}, { VALUE: ["text", null] });
     setParent(blocks, twArgDTVal, twSetDT);
     mk(blocks, twSetDT, "data_setvariableto",
       { VALUE: blockInputStr(twArgDTVal) },
       { VARIABLE: ["__font_displayText", varDisplayText] });
+
+    const twSetRtEn = buildFontConfigSet(varRichTextEnabled, "__font_richTextEnabled", 10);
 
     // 2. set __font_x = x arg (if "" use Font_Config[1])
     const twSetX = uid(), twArgXVal = uid(), twXCond = uid(), twXItem = uid(), twXFromArg = uid(), twSetXIf = uid();
@@ -2472,6 +2603,45 @@ export function generateScratchProject(
       { VARIABLE: ["__font_ghost", varGhost] });
     setParent(blocks, twCfgGhItem, twSetGh);
 
+    // richtext preprocess branch for typewriter
+    const twDelX  = uid(); mk(blocks, twDelX,  "data_deletealloflist", {}, { LIST: ["__font_rq_x",      listRqX]      });
+    const twDelY  = uid(); mk(blocks, twDelY,  "data_deletealloflist", {}, { LIST: ["__font_rq_y",      listRqY]      });
+    const twDelSz = uid(); mk(blocks, twDelSz, "data_deletealloflist", {}, { LIST: ["__font_rq_size",   listRqSize]   });
+    const twDelCo = uid(); mk(blocks, twDelCo, "data_deletealloflist", {}, { LIST: ["__font_rq_color",  listRqColor]  });
+    const twDelGh = uid(); mk(blocks, twDelGh, "data_deletealloflist", {}, { LIST: ["__font_rq_ghost",  listRqGhost]  });
+    const twDelBr = uid(); mk(blocks, twDelBr, "data_deletealloflist", {}, { LIST: ["__font_rq_bright", listRqBright] });
+    const twDelDl = uid(); mk(blocks, twDelDl, "data_deletealloflist", {}, { LIST: ["__font_rq_delay",  listRqDelay]  });
+    const twClearDT = uid();
+    mk(blocks, twClearDT, "data_setvariableto", { VALUE: strLit("") }, { VARIABLE: ["__font_displayText", varDisplayText] });
+    const twCallPp = uid(), twArgTextForPp = uid(), twPpShadow = uid();
+    mk(blocks, twArgTextForPp, "argument_reporter_string_number", {}, { VALUE: ["text", null] });
+    mk(blocks, twPpShadow, "argument_reporter_string_number", {}, { VALUE: ["text", null] }, false, true);
+    setParent(blocks, twArgTextForPp, twCallPp);
+    setParent(blocks, twPpShadow, twCallPp);
+    mk(blocks, twCallPp, "procedures_call", {
+      [ppArgTextId]: [3, twArgTextForPp, twPpShadow],
+    }, {}, false, false, undefined, {
+      tagName: "mutation", children: [],
+      proccode: "__font_preprocess %s",
+      argumentids: JSON.stringify([ppArgTextId]),
+      warp: "true",
+    });
+    chain(blocks, [twDelX, twDelY, twDelSz, twDelCo, twDelGh, twDelBr, twDelDl, twClearDT, twCallPp]);
+    const twRtEnVar = uid();
+    mk(blocks, twRtEnVar, "data_variable", {}, { VARIABLE: ["__font_richTextEnabled", varRichTextEnabled] });
+    const twRtEnEq = uid();
+    setParent(blocks, twRtEnVar, twRtEnEq);
+    mk(blocks, twRtEnEq, "operator_equals", { OPERAND1: blockInput(twRtEnVar), OPERAND2: numLit(1) }, {});
+    const twIfRtEnabled = uid();
+    setParent(blocks, twRtEnEq, twIfRtEnabled);
+    setParent(blocks, twDelX, twIfRtEnabled);
+    setParent(blocks, twSetDT, twIfRtEnabled);
+    mk(blocks, twIfRtEnabled, "control_if_else", {
+      CONDITION: boolInput(twRtEnEq),
+      SUBSTACK: substackInput(twDelX),
+      SUBSTACK2: substackInput(twSetDT),
+    }, {});
+
     // 11. set __font_curX = __font_x
     const twSetCurX = uid(), twXVar = uid();
     mk(blocks, twXVar, "data_variable", {}, { VARIABLE: ["__font_x", varX] });
@@ -2528,6 +2698,31 @@ export function generateScratchProject(
     mk(blocks, twSetChar, "data_setvariableto",
       { VALUE: blockInputStr(twLetterChar) },
       { VARIABLE: ["__tw_char", varTwChar] });
+
+    const twSetDelayFromArg = uid(), twArgMsValForDelay = uid();
+    mk(blocks, twArgMsValForDelay, "argument_reporter_string_number", {}, { VALUE: ["msPerChar", null] });
+    setParent(blocks, twArgMsValForDelay, twSetDelayFromArg);
+    mk(blocks, twSetDelayFromArg, "data_setvariableto", { VALUE: blockInput(twArgMsValForDelay) }, { VARIABLE: ["__tw_delay", varTwDelay] });
+    const twSetDelayFromRq = uid(), twIForDelay = uid(), twDelayItem = uid();
+    mk(blocks, twIForDelay, "data_variable", {}, { VARIABLE: ["__font_i", varI] });
+    setParent(blocks, twIForDelay, twDelayItem);
+    mk(blocks, twDelayItem, "data_itemoflist", { INDEX: blockInput(twIForDelay) }, { LIST: ["__font_rq_delay", listRqDelay] });
+    setParent(blocks, twDelayItem, twSetDelayFromRq);
+    mk(blocks, twSetDelayFromRq, "data_setvariableto", { VALUE: blockInput(twDelayItem) }, { VARIABLE: ["__tw_delay", varTwDelay] });
+    const twRtEnVarInLoop = uid();
+    mk(blocks, twRtEnVarInLoop, "data_variable", {}, { VARIABLE: ["__font_richTextEnabled", varRichTextEnabled] });
+    const twRtEnEqInLoop = uid();
+    setParent(blocks, twRtEnVarInLoop, twRtEnEqInLoop);
+    mk(blocks, twRtEnEqInLoop, "operator_equals", { OPERAND1: blockInput(twRtEnVarInLoop), OPERAND2: numLit(1) }, {});
+    const twSetDelayIf = uid();
+    setParent(blocks, twRtEnEqInLoop, twSetDelayIf);
+    setParent(blocks, twSetDelayFromRq, twSetDelayIf);
+    setParent(blocks, twSetDelayFromArg, twSetDelayIf);
+    mk(blocks, twSetDelayIf, "control_if_else", {
+      CONDITION: boolInput(twRtEnEqInLoop),
+      SUBSTACK: substackInput(twSetDelayFromRq),
+      SUBSTACK2: substackInput(twSetDelayFromArg),
+    }, {});
 
     // b. if __tw_char = "\":
     //      if letter (__font_i + 1) of displayText = "n": handle newline
@@ -2710,14 +2905,14 @@ export function generateScratchProject(
     setParent(blocks, twIfN, twIfBS);
     setParent(blocks, twCallBS, twIfBS);
 
-    // d. if (msPerChar > 0) and (__tw_skip = 0): wait msPerChar/1000 seconds
+    // d. if (__tw_delay > 0) and (__tw_skip = 0): wait __tw_delay/1000 seconds
     const twIfWait = uid();
     const twCondAnd = uid(), twCondMsGt0 = uid(), twCondSkip0 = uid();
-    const twMsArgGt = uid();
-    mk(blocks, twMsArgGt, "argument_reporter_string_number", {}, { VALUE: ["msPerChar", null] });
-    setParent(blocks, twMsArgGt, twCondMsGt0);
+    const twDelayVarGt = uid();
+    mk(blocks, twDelayVarGt, "data_variable", {}, { VARIABLE: ["__tw_delay", varTwDelay] });
+    setParent(blocks, twDelayVarGt, twCondMsGt0);
     mk(blocks, twCondMsGt0, "operator_gt", {
-      OPERAND1: blockInput(twMsArgGt),
+      OPERAND1: blockInput(twDelayVarGt),
       OPERAND2: numLit(0),
     }, {});
     setParent(blocks, twCondMsGt0, twCondAnd);
@@ -2735,12 +2930,12 @@ export function generateScratchProject(
     }, {});
     setParent(blocks, twCondAnd, twIfWait);
 
-    // wait (msPerChar / 1000) seconds
-    const twWait = uid(), twWaitDiv = uid(), twMsArgDiv = uid();
-    mk(blocks, twMsArgDiv, "argument_reporter_string_number", {}, { VALUE: ["msPerChar", null] });
-    setParent(blocks, twMsArgDiv, twWaitDiv);
+    // wait (__tw_delay / 1000) seconds
+    const twWait = uid(), twWaitDiv = uid(), twDelayVarDiv = uid();
+    mk(blocks, twDelayVarDiv, "data_variable", {}, { VARIABLE: ["__tw_delay", varTwDelay] });
+    setParent(blocks, twDelayVarDiv, twWaitDiv);
     mk(blocks, twWaitDiv, "operator_divide", {
-      NUM1: blockInput(twMsArgDiv),
+      NUM1: blockInput(twDelayVarDiv),
       NUM2: numLit(1000),
     }, {});
     setParent(blocks, twWaitDiv, twWait);
@@ -2758,7 +2953,7 @@ export function generateScratchProject(
       { VARIABLE: ["__font_i", varI] });
 
     // link repeat body: setChar → ifBS → ifWait → changeI
-    chain(blocks, [twSetChar, twIfBS, twIfWait, twChangeI]);
+    chain(blocks, [twSetChar, twSetDelayIf, twIfBS, twIfWait, twChangeI]);
 
     mk(blocks, twRepeat, "control_repeat", {
       TIMES: blockInput(twLenDT, 10),
@@ -2774,7 +2969,7 @@ export function generateScratchProject(
     // link full definition body
     chain(blocks, [
       twDefId,
-      twSetDT, twSetXIf, twSetYIf, twCallClear,
+      twSetRtEn, twIfRtEnabled, twSetXIf, twSetYIf, twCallClear,
       twSetRunning, twSetSkip0,
       twSetSz, twSetCol, twSetBr, twSetGh,
       twSetCurX, twSetCurY,
@@ -3332,6 +3527,7 @@ export function generateScratchProject(
     [varBrightness]: ["__font_brightness", 0],
     [varGhost]: ["__font_ghost", 0],
     [varLayer]: ["__font_layer", 1],
+    [varRichTextEnabled]: ["__font_richTextEnabled", richTextEnabledByDefault ? 1 : 0],
     [varLetterSpacing]: ["__font_letterSpacing", options.letterSpacing ?? 0],
     [varLineHeight]: ["__font_lineHeight", lineHeight],
     [varAlign]: ["__font_align", options.align ?? "left"],
@@ -3341,6 +3537,7 @@ export function generateScratchProject(
     [varTwRunning]: ["__tw_running", 0],
     [varTwSkip]: ["__tw_skip", 0],
     [varTwChar]: ["__tw_char", ""],
+    [varTwDelay]: ["__tw_delay", 0],
     // Number format variables (§18)
     [varFmtResult]: ["__fmt_result", ""],
     [varFmtStr]: ["__fmt_str", ""],
@@ -3376,6 +3573,7 @@ export function generateScratchProject(
       [varConKey]: ["__con_key", ""],
       [varConVal]: ["__con_val", ""],
       [varConRawText]: ["__con_rawText", ""],
+      [varConRichText]: ["__con_richText", richTextEnabledByDefault ? 1 : 0],
     } : {}),
   };
 
@@ -3393,6 +3591,7 @@ export function generateScratchProject(
         [listRqColor]: ["__font_rq_color",  []],
         [listRqGhost]: ["__font_rq_ghost",  []],
         [listRqBright]:["__font_rq_bright", []],
+        [listRqDelay]: ["__font_rq_delay",  []],
       } : {}),
     },
     broadcasts: {},

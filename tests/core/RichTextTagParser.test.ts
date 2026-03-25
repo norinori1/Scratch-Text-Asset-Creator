@@ -39,6 +39,11 @@ describe("parseRichText", () => {
     expect(result[0].ghost).toBe(50);
   });
 
+  it("parses tag args with spaces (e.g. <g = 50>)", () => {
+    const result = parseRichText("<g = 50>半透明</g>");
+    expect(result[0].ghost).toBe(50);
+  });
+
   it("parses <b=N> brightness tag", () => {
     const result = parseRichText("<b=-50>暗く</b>");
     expect(result[0].brightness).toBe(-50);
@@ -206,6 +211,14 @@ describe("serializeSegmentsToQueue", () => {
     const segments: RtSegment[] = [{ text: "S", shake: true }];
     const queue = serializeSegmentsToQueue(segments);
     expect(queue[0]).toContain("|shake|");
+  });
+
+  it("serializes animAmp/animSpd when provided", () => {
+    const segments: RtSegment[] = [{ text: "W", wave: true, animAmp: 6, animSpd: 3 }];
+    const queue = serializeSegmentsToQueue(segments);
+    const parts = queue[0].split("|");
+    expect(parts[8]).toBe("6");
+    expect(parts[9]).toBe("3");
   });
 
   it("uses empty string for animType when no animation flag is set", () => {
@@ -387,4 +400,3 @@ describe("parseConsoleScript", () => {
     expect(result[0].layer).toBe(1);
   });
 });
-
