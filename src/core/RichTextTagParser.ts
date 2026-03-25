@@ -51,6 +51,7 @@ export function parseRichText(input: string): RtSegment[] {
   const preprocessed = input.replace(/<br\s*\/?>/gi, "\n");
 
   const segments: RtSegment[] = [];
+  // 値部分は ">" を含まない前提（例: <c=100> / <g = 50>）でパースする。
   const tagRegex = /<(\w+)\s*(?:=\s*([^>]*))?\s*>(.*?)<\/\1>/gs;
   let lastIndex = 0;
 

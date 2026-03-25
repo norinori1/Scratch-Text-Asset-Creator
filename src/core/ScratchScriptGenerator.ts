@@ -1681,7 +1681,7 @@ export function generateScratchProject(
     const ppResetInTag  = uid(); mk(blocks, ppResetInTag,  "data_setvariableto", { VALUE: numLit(0) },  { VARIABLE: ["__pp_inTag",  varPpInTag]  });
     chain(blocks, [ppCallApply, ppResetTagBuf, ppResetInTag]);
 
-    // else: append __pp_ch to __pp_tagBuf (tag内スペースは無視して正規化)
+    // else: append __pp_ch to __pp_tagBuf (tag内の半角スペースは明示的に除外)
     const ppAppendTagBuf = uid();
     {
       const tbVar = uid(), chVar = uid(), joinId = uid();
