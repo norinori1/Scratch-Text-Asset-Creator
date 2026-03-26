@@ -1,13 +1,15 @@
 declare global {
   interface Window {
-    dataLayer: unknown[];
+    dataLayer: unknown[][];
   }
 }
 
 const GA_MEASUREMENT_ID = import.meta.env.VITE_GA_MEASUREMENT_ID?.trim();
+const GA4_MEASUREMENT_ID_PATTERN = /^G-[A-Z0-9]+$/;
 
 export const initializeAnalytics = (): void => {
   if (!GA_MEASUREMENT_ID) return;
+  if (!GA4_MEASUREMENT_ID_PATTERN.test(GA_MEASUREMENT_ID)) return;
 
   const existingScript = document.querySelector(
     `script[data-ga4-id="${GA_MEASUREMENT_ID}"]`
@@ -21,9 +23,9 @@ export const initializeAnalytics = (): void => {
   document.head.appendChild(script);
 
   window.dataLayer = window.dataLayer || [];
-  const gtag = (...args: unknown[]): void => {
+  const pushGtagEvent = (...args: unknown[]): void => {
     window.dataLayer.push(args);
   };
-  gtag("js", new Date());
-  gtag("config", GA_MEASUREMENT_ID);
+  pushGtagEvent("js", new Date());
+  pushGtagEvent("config", GA_MEASUREMENT_ID);
 };
