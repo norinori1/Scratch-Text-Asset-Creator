@@ -21,6 +21,16 @@ npm ci
 npm run dev
 ```
 
+### GA4 設定
+
+GA4（Google Analytics 4）を有効にする場合は、プロジェクトルートに `.env.local` を作成し、測定 ID を設定してください。
+
+```bash
+VITE_GA_MEASUREMENT_ID=G-XXXXXXXXXX
+```
+
+`VITE_GA_MEASUREMENT_ID` が未設定の場合、GA4 は読み込まれません。
+
 ### ビルド
 
 ```bash
